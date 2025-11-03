@@ -78,16 +78,6 @@ spec:
                 configMapKeyRef:
                   name: {{ include "infra-agent.fullname" . }}-config
                   key: LOG_FORMAT
-            - name: SSL_KEY_PATH
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "infra-agent.fullname" . }}-config
-                  key: SSL_KEY_PATH
-            - name: SSL_CERT_PATH
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "infra-agent.fullname" . }}-config
-                  key: SSL_CERT_PATH
             - name: GITLAB_URL
               valueFrom:
                 configMapKeyRef:
