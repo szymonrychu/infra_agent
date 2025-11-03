@@ -367,13 +367,12 @@ async def _router_tool(category: str) -> List[OpenAITool]:
 
 router = OpenAITool(
     function=OpenAIFunction(
-        name="route_tools",
-        description="Main router tool to select category of tools to use",
+        name="route_intent",
+        description="Route user requests to the correct tool group.",
         parameters=OpenAIToolParameter(
-            description="Category of the tools to route to",
             properties={
                 "category": OpenAIToolParameterProperty(
-                    description="Pod namespace", enum=["gitlab", "grafana", "kubernetes"]
+                    description="Category of the tools to route to", enum=["gitlab", "grafana", "kubernetes"]
                 )
             },
             required=["category"],
