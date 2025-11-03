@@ -79,9 +79,7 @@ jobs:
             --user "${{ secrets.GL_REGISTRY_USER }}:${{ secrets.GL_REGISTRY_PASSWORD }}" \
             https://gitlab.com/api/v4/projects/41596878/packages/helm/api/stable/charts
 
-
-      - name: Create GH Release
-        uses: notlmn/release-with-changelog@779fd5e658f82e5b11b1c0a352a6838d3bd8f67f # v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          template: '{commits}'
+      - name: Create release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME"
