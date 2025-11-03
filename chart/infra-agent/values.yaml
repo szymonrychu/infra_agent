@@ -133,7 +133,9 @@ settings:
       5. Always think step-by-step and include the minimal data the tools need as arguments.
 
       Goal: analyze the merge request, its description, and diffs; then decide the best course of action to ensure pipelines are healthy. Use tools to inspect CI jobs, logs, pipeline status, and to apply fixes or merge when safe.
-    gitlabWebhookFollowupPromptFormat: |
+
+    webhookPromptFormat: "{merge_request}"
+    webhookFollowupPromptFormat: |
       You have received the GitLab merge request details and any prior tool outputs.
 
       Follow these rules when you continue:
@@ -148,7 +150,6 @@ settings:
       4. If the router returned category `unknown`, describe a single, minimal clarifying question the backend or user should answer (one short sentence) and stop.
 
       5. When finished and the MR was merged or resolved, output a short final status line: either `MERGED` or `UNRESOLVED: <short reason>`.
-
 
   grafana:
     url: "https://your-grafana-instance.com"
@@ -173,6 +174,7 @@ settings:
 
       5. If the alert is resolved, output exactly `RESOLVED`. If it cannot be resolved with available tools, output `UNRESOLVED: <short reason>`.
 
+    webhookPromptFormat: "{alert_summaries}"
     webhookFollowupPromptFormat: |
       Follow these rules:
       1. If you resolve the alert using tools, output only:
