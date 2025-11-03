@@ -125,6 +125,7 @@ jobs:
 
       - name: Package and upload charts
         run: |
+          set -e
           helm package \
             --dependency-update "./chart/${CHART_NAME}" \
             --version ${{ steps.prep.outputs.chart_version }} \
@@ -133,5 +134,5 @@ jobs:
 
           curl --request POST \
             --form "chart=@${CHART_NAME}-${{ steps.prep.outputs.chart_version }}.tgz" \
-            --user "${GL_REGISTRY_USER}:${GL_REGISTRY_PASSWORD}" \
+            --user "${{ secrets.GL_REGISTRY_USER }}:${{ secrets.GL_REGISTRY_PASSWORD }}" \
             https://gitlab.com/api/v4/projects/41596878/packages/helm/api/stable/charts

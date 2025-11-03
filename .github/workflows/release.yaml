@@ -67,24 +67,18 @@ jobs:
 
       - name: Package and upload charts
         run: |
-          set -ex
+          set -e
+          helm package \
+            --dependency-update "./chart/${CHART_NAME}" \
+            --version ${{ steps.prep.outputs.chart_version }} \
+            --app-version ${{ steps.prep.outputs.app_version }} \
+            -u -d ./ "./chart/${CHART_NAME}"
 
-          mkdir ~/.ssh
-          echo "${CHARTS_REPO_KEY}" | base64 --decode > ~/.ssh/id_rsa
-          chmod 0600 ~/.ssh/id_rsa
+          curl --request POST \
+            --form "chart=@${CHART_NAME}-${{ steps.prep.outputs.chart_version }}.tgz" \
+            --user "${{ secrets.GL_REGISTRY_USER }}:${{ secrets.GL_REGISTRY_PASSWORD }}" \
+            https://gitlab.com/api/v4/projects/41596878/packages/helm/api/stable/charts
 
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-
-          docker run --rm \
-            -v $(pwd):/app \
-            -v ${HOME}/.ssh:/root/.ssh \
-            -v ${HOME}/.gitconfig:/root/.gitconfig \
-            ghcr.io/szymonrychu/chart-utils:latest \
-              -c "${CHART_NAME}" \
-              -o "${CHARTS_REPO_OWNER}" \
-              -r "${CHARTS_REPO_URL}" \
-              -v "${{ steps.prep.outputs.chart_version }}" \
-              -a "${{ steps.prep.outputs.container_version }}"
 
       - name: Create GH Release
         uses: notlmn/release-with-changelog@779fd5e658f82e5b11b1c0a352a6838d3bd8f67f # v3
