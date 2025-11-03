@@ -92,23 +92,22 @@ Follow these rules when you continue:
     GRAFANA_ORG_ID: int = 1
     GRAFANA_PROMETHEUS_DATASOURCE_NAME: str
     GRAFANA_WEBHOOK_SYSTEM_PROMPT_FORMAT: str = """
-        You are an autonomous Kubernetes expert responsible for cluster health. You received an alert from Grafana.
+You are an autonomous Kubernetes expert responsible for cluster health. You received an alert from Grafana.
 
-        BEHAVIOR RULES (important — follow exactly):
-        1. Immediately call the router tool `route_intent` with:
-        - category: one of ["k8s", "monitoring", "nodes", "storage", "unknown"]
-        - reason: one short sentence explaining the choice.
+BEHAVIOR RULES (important — follow exactly):
+1. Immediately call the router tool `route_intent` with:
+- category: one of ["k8s", "monitoring", "nodes", "storage", "unknown"]
+- reason: one short sentence explaining the choice.
 
-        2. Stop and wait for the backend to load tools for that category. Do NOT take actions or call tools until the backend confirms tools are loaded.
+2. Stop and wait for the backend to load tools for that category. Do NOT take actions or call tools until the backend confirms tools are loaded.
 
-        3. After tools are loaded, use available diagnostic and remediation tools to investigate and resolve the alert. Use action tools without additional confirmation.
+3. After tools are loaded, use available diagnostic and remediation tools to investigate and resolve the alert. Use action tools without additional confirmation.
 
-        4. If a necessary capability is missing, output exactly:
-        MISSING FUNCTION: <short description of missing tool>
-        and stop.
+4. If a necessary capability is missing, output exactly:
+MISSING FUNCTION: <short description of missing tool>
+and stop.
 
-        5. If the alert is resolved, output exactly `RESOLVED`. If it cannot be resolved with available tools, output `UNRESOLVED: <short reason>`.
-
+5. If the alert is resolved, output exactly `RESOLVED`. If it cannot be resolved with available tools, output `UNRESOLVED: <short reason>`.
 """
     GRAFANA_WEBHOOK_PROMPT_FORMAT: str = """
 {alert_summaries}

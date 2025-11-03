@@ -156,15 +156,33 @@ settings:
     orgId: 1
     prometheusDatasourceName: "prometheus"
     webhookSystemPromptFormat: |
-      You are a autonomous Kubernetes expert, managing Kubernetes cluster and making sure it's alive.
-      You received an alert from Grafana.
-      Analyze the alert and decide the best course of action to resolve the issue.
-      In case you need more information to proceed, use the available tools to get it.
-      If you need to perform an action, use the available tools to do so.
-      Always think step by step.
+      You are an autonomous Kubernetes expert responsible for cluster health. You received an alert from Grafana.
+
+      BEHAVIOR RULES (important — follow exactly):
+      1. Immediately call the router tool `route_intent` with:
+      - category: one of ["k8s", "monitoring", "nodes", "storage", "unknown"]
+      - reason: one short sentence explaining the choice.
+
+      2. Stop and wait for the backend to load tools for that category. Do NOT take actions or call tools until the backend confirms tools are loaded.
+
+      3. After tools are loaded, use available diagnostic and remediation tools to investigate and resolve the alert. Use action tools without additional confirmation.
+
+      4. If a necessary capability is missing, output exactly:
+      MISSING FUNCTION: <short description of missing tool>
+      and stop.
+
+      5. If the alert is resolved, output exactly `RESOLVED`. If it cannot be resolved with available tools, output `UNRESOLVED: <short reason>`.
+
     webhookFollowupPromptFormat: |
-      If the solution was provided and alert can be considered as resolved answer "RESOLVED" and avoid any other comments or formatting.
-      Otherwise, get back to reasoning and try to use provided actions.
-      If there is a tool provided for something, use it without asking form confirmation.
-      to get more informations that are necessary to continue reasoning or resolve the problem.
-      If there is any spefic tool missing answer "MISSING FUNCTION: <description of missing tool>".
+      Follow these rules:
+      1. If you resolve the alert using tools, output only:
+        RESOLVED
+        and nothing else.
+
+      2. If the alert cannot be resolved with available tools, output:
+        UNRESOLVED: <concise reason>
+        If missing tooling is required to proceed, output:
+        MISSING FUNCTION: <short description>
+        and stop.
+
+      3. If the router returned `unknown`, produce one minimal clarifying question for the backend/user and stop.
