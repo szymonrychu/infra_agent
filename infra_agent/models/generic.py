@@ -11,6 +11,13 @@ class PromptSummary(BaseModel):
     resolved: bool
 
 
+class CaseSummary(BaseModel):
+    type: str = "case_summary"
+    solved: bool
+    explanation: str
+    missing_tools: List[str] | None = None
+
+
 class SuccessPromptSummary(BaseModel):
     type: str = "success"
 

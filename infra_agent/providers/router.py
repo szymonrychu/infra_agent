@@ -6,7 +6,7 @@ from infra_agent.models.ai import (
     OpenAIToolParameter,
     OpenAIToolParameterProperty,
 )
-from infra_agent.models.generic import PromptToolError
+from infra_agent.models.generic import CaseSummary, PromptToolError
 from infra_agent.providers.gl import (
     approve_merge_request,
     create_merge_request_from_branch,
@@ -23,9 +23,8 @@ from infra_agent.providers.grafana import (
     get_pod_container_memory_usage,
     list_grafana_alerts,
 )
-from infra_agent.providers.k8s import (
+from infra_agent.providers.k8s import (  # get_node_resources,
     delete_pod,
-    get_node_resources,
     get_pod_details,
     get_pod_helm_release_metadata,
     get_pod_logs,
@@ -324,17 +323,17 @@ _route_to_tool_list = {
             ),
             handler=list_node_pods,
         ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="get_node_resources",
-                description="Get Kubernetes node resource capacity and possible allocatablity",
-                parameters=OpenAIToolParameter(
-                    properties={"node_name": OpenAIToolParameterProperty(description="Node name")},
-                    required=["node_name"],
-                ),
-            ),
-            handler=get_node_resources,
-        ),
+        # OpenAITool(
+        #     function=OpenAIFunction(
+        #         name="get_node_resources",
+        #         description="Get Kubernetes node resource capacity and possible allocatablity",
+        #         parameters=OpenAIToolParameter(
+        #             properties={"node_name": OpenAIToolParameterProperty(description="Node name")},
+        #             required=["node_name"],
+        #         ),
+        #     ),
+        #     handler=get_node_resources,
+        # ),
         OpenAITool(
             function=OpenAIFunction(
                 name="get_pod_helm_release_metadata",
@@ -352,9 +351,11 @@ _route_to_tool_list = {
     ],
 }
 
+tool_categories = list(_route_to_tool_list.keys())
+
 
 async def _router_tool(category: str) -> List[OpenAITool]:
-    if category not in _route_to_tool_list.keys():
+    if category not in tool_categories:
         raise PromptToolError(
             message="No such category found",
             tool_name="route_tools",
@@ -365,6 +366,18 @@ async def _router_tool(category: str) -> List[OpenAITool]:
     return _route_to_tool_list.get(category, [])
 
 
+async def _closer_tool(
+    solved: bool,
+    explanation: str,
+    missing_tools: List[str] | None = None,
+) -> CaseSummary:
+    return CaseSummary(
+        solved=solved,
+        explanation=explanation,
+        missing_tools=missing_tools or [],
+    )
+
+
 router = OpenAITool(
     function=OpenAIFunction(
         name="route_intent",
@@ -372,11 +385,37 @@ router = OpenAITool(
         parameters=OpenAIToolParameter(
             properties={
                 "category": OpenAIToolParameterProperty(
-                    description="Category of the tools to route to", enum=["gitlab", "grafana", "kubernetes"]
+                    description="Category of the tools to route to", enum=tool_categories
                 )
             },
             required=["category"],
         ),
     ),
     handler=_router_tool,
+)
+
+closer = OpenAITool(
+    function=OpenAIFunction(
+        name="finish_reasoning",
+        description="Run the function to finish the case and provide final answer to the user.",
+        parameters=OpenAIToolParameter(
+            properties={
+                "solved": OpenAIToolParameterProperty(
+                    description="Information for user if the case was solved successfully",
+                    type="boolean",
+                ),
+                "explanation": OpenAIToolParameterProperty(
+                    description="Explanation message for the user about the case resolution",
+                    type="string",
+                ),
+                "missing_tools": OpenAIToolParameterProperty(
+                    description="List of tools that would be useful to solve the case, but are not available",
+                    type="array",
+                    items={"type": "string"},
+                ),
+            },
+            required=["solved", "explanation"],
+        ),
+    ),
+    handler=_closer_tool,
 )

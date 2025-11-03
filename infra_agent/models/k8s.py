@@ -47,15 +47,15 @@ class NodeCondition(KubernetesModel):
     reason: Optional[str] = None
     message: Optional[str] = None
 
-    @property
-    def heartbeat_at(self) -> Optional[datetime]:
-        """Return heartbeat time as datetime object"""
-        return self.last_heartbeat_time
+    # @property
+    # def heartbeat_at(self) -> Optional[datetime]:
+    #     """Return heartbeat time as datetime object"""
+    #     return self.last_heartbeat_time
 
-    @property
-    def transitioned_at(self) -> Optional[datetime]:
-        """Return transition time as datetime object"""
-        return self.last_transition_time
+    # @property
+    # def transitioned_at(self) -> Optional[datetime]:
+    #     """Return transition time as datetime object"""
+    #     return self.last_transition_time
 
 
 class NodeStatus(KubernetesModel):
@@ -85,29 +85,25 @@ class NodeMetadata(KubernetesModel):
     """Node metadata"""
 
     name: str
-    uid: Optional[str] = None
-    resource_version: Optional[str] = Field(None, alias="resourceVersion")
     # creation_timestamp: Optional[datetime] = Field(None, alias="creationTimestamp")
     # deletion_timestamp: Optional[datetime] = Field(None, alias="deletionTimestamp")
     labels: Optional[dict[str, str]] = None
     annotations: Optional[dict[str, str]] = None
 
-    @property
-    def created_at(self) -> Optional[datetime]:
-        """Return creation timestamp as datetime object"""
-        return self.creation_timestamp
+    # @property
+    # def created_at(self) -> Optional[datetime]:
+    #     """Return creation timestamp as datetime object"""
+    #     return self.creation_timestamp
 
-    @property
-    def deleted_at(self) -> Optional[datetime]:
-        """Return deletion timestamp as datetime object"""
-        return self.deletion_timestamp
+    # @property
+    # def deleted_at(self) -> Optional[datetime]:
+    #     """Return deletion timestamp as datetime object"""
+    #     return self.deletion_timestamp
 
 
 class Node(KubernetesModel):
     """Represents a Kubernetes node"""
 
-    api_version: Optional[str] = Field(None, alias="apiVersion")
-    kind: Optional[str] = None
     metadata: NodeMetadata
     spec: Optional[NodeSpec] = None
     status: Optional[NodeStatus] = None
@@ -116,9 +112,6 @@ class Node(KubernetesModel):
 class KubernetesNodeList(KubernetesModel):
     """List of Kubernetes nodes"""
 
-    api_version: str = Field(alias="apiVersion", default="v1")
-    kind: str = Field(default="NodeList")
-    metadata: dict = Field(default_factory=dict)
     items: List[Node]
 
 
@@ -142,7 +135,7 @@ class ContainerState(KubernetesModel):
     """Container state information"""
 
     # running: Optional[Dict[str, datetime]] = None
-    terminated: Optional[Dict[str, Any]] = None
+    # terminated: Optional[Dict[str, Any]] = None
     waiting: Optional[Dict[str, str]] = None
 
 
@@ -254,21 +247,16 @@ class PodSpec(KubernetesModel):
 
     containers: List[Container]
     volumes: Optional[List[Volume]] = None
-    affinity: Optional[Affinity] = None
+    # affinity: Optional[Affinity] = None
     node_name: Optional[str] = Field(None, alias="nodeName")
-    service_account_name: Optional[str] = Field(None, alias="serviceAccountName")
-    service_account: Optional[str] = Field(None, alias="serviceAccount")
+    # service_account_name: Optional[str] = Field(None, alias="serviceAccountName")
+    # service_account: Optional[str] = Field(None, alias="serviceAccount")
     restart_policy: Optional[str] = Field(None, alias="restartPolicy")
-    termination_grace_period_seconds: Optional[int] = Field(None, alias="terminationGracePeriodSeconds")
-    dns_policy: Optional[str] = Field(None, alias="dnsPolicy")
-    node_selector: Optional[Dict[str, str]] = Field(None, alias="nodeSelector")
+    # dns_policy: Optional[str] = Field(None, alias="dnsPolicy")
+    # node_selector: Optional[Dict[str, str]] = Field(None, alias="nodeSelector")
     security_context: Optional[Dict[str, Any]] = Field(None, alias="securityContext")
-    scheduler_name: Optional[str] = Field(None, alias="schedulerName")
-    tolerations: Optional[List[Toleration]] = None
-    priority: Optional[int] = None
-    enable_service_links: Optional[bool] = Field(None, alias="enableServiceLinks")
-    preemption_policy: Optional[str] = Field(None, alias="preemptionPolicy")
-    image_pull_secrets: Optional[List[Dict[str, str]]] = Field(None, alias="imagePullSecrets")
+    # tolerations: Optional[List[Toleration]] = None
+    # priority: Optional[int] = None
 
 
 class PodCondition(KubernetesModel):
@@ -291,15 +279,9 @@ class PodIP(KubernetesModel):
 class PodStatus(KubernetesModel):
     """Pod status information"""
 
-    phase: Optional[str] = None
     conditions: Optional[List[PodCondition]] = None
-    host_ip: Optional[str] = Field(None, alias="hostIP")
-    pod_ip: Optional[str] = Field(None, alias="podIP")
-    pod_ips: Optional[List[PodIP]] = Field(None, alias="podIPs")
     # start_time: Optional[datetime] = Field(None, alias="startTime")
-    container_statuses: Optional[List[ContainerStatus]] = Field(None, alias="containerStatuses")
-    qos_class: Optional[str] = Field(None, alias="qosClass")
-    host_ips: Optional[List[PodIP]] = Field(None, alias="hostIPs")
+    # container_statuses: Optional[List[ContainerStatus]] = Field(None, alias="containerStatuses")
 
 
 class PodMetadata(KubernetesModel):
@@ -309,7 +291,6 @@ class PodMetadata(KubernetesModel):
     namespace: Optional[str] = None
     labels: Optional[Dict[str, str]] = None
     annotations: Optional[Dict[str, str]] = None
-    owner_references: Optional[List[Dict[str, Any]]] = Field(None, alias="ownerReferences")
 
 
 class Pod(KubernetesModel):

@@ -1,6 +1,6 @@
-from typing import Callable, List
+from typing import Any, Callable, List
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class OpenAIToolParameterProperty(BaseModel):
@@ -24,7 +24,7 @@ class OpenAIFunction(BaseModel):
 class OpenAITool(BaseModel):
     type: str = "function"
     function: OpenAIFunction
-    handler: Callable | None = None
+    handler: Callable | None = Field(default=None, exclude=True)
 
 
 class OpenAIFunctionCall(BaseModel):
@@ -37,6 +37,7 @@ class OpenAIToolCall(BaseModel):
     type: str = "function"
     id: str
     function: OpenAIFunctionCall
+    result: Any | None = Field(default=None, exclude=True)
 
 
 class OpenAIMessage(BaseModel):

@@ -7,7 +7,7 @@ from ratelimit import limits, sleep_and_retry
 
 from infra_agent.models.ai import OpenAIMessage, OpenAITool, OpenAIToolCall
 from infra_agent.models.generic import PromptSummary, PromptToolError
-from infra_agent.providers.router import router
+from infra_agent.providers.router import closer, router, tool_categories
 from infra_agent.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ async def __gpt_query(
         "model": model,
         "messages": [message.model_dump(exclude_none=True) for message in messages],
     }
-    completions_create_kwargs["tools"] = [tool.model_dump(exclude_none=True, exclude={"handler"}) for tool in tools]
+    completions_create_kwargs["tools"] = [tool.model_dump(exclude_none=True) for tool in tools]
     completions_create_kwargs["tool_choice"] = "auto"
     raw_ai_message = None
     try:
@@ -78,8 +78,8 @@ async def _handle_tool_calls(
     tools: List[OpenAITool], tool_calls: List[OpenAIToolCall] | None = None
 ) -> Tuple[List[OpenAIMessage], List[OpenAITool]] | None:
     messages = []
-    _tools = [router] + tools
-    logger.info(f"Available tools: [{','.join([call.function.name for call in tool_calls or []])}]")
+    _tools = [router] + tools + [closer]
+    logger.info(f"Available tools: [{','.join([t.function.name for t in _tools or []])}]")
     for tool_call in tool_calls or []:
         parsed_args = json.loads(tool_call.function.arguments)
 
@@ -90,6 +90,7 @@ async def _handle_tool_calls(
                 if tool.handler:
                     try:
                         tool_result = await _run_tool(tool, parsed_args)
+                        tool_call.result = tool_result
                         if tool_call.function.name == router.function.name:
                             logger.info("router tool called, adding returned tools to available tools")
                             tools = tool_result
@@ -101,6 +102,15 @@ async def _handle_tool_calls(
                                     tool_call_id=tool_call.id,
                                 )
                             )
+                        elif tool_call.function.name == closer.function.name:
+                            logger.info("closer tool called, finishing reasoning")
+                            messages.append(
+                                OpenAIMessage(
+                                    role="tool",
+                                    name=tool_call.function.name,
+                                )
+                            )
+                            return messages, tools
                         else:
                             messages.append(
                                 OpenAIMessage(
@@ -167,6 +177,8 @@ async def gpt_query(
     **kwargs: Any,
 ) -> PromptSummary:
     if not messages and system_prompt:
+        system_prompt_kwargs = kwargs
+        system_prompt_kwargs["tool_caterories"] = f"[{','.join(tool_categories)}]"
         messages.append(OpenAIMessage(role="developer", content=system_prompt.format(**kwargs)))
     messages.append(OpenAIMessage(role="user", content=prompt.format(**kwargs)))
     response_message = await __gpt_query(messages, model, [router])
@@ -186,9 +198,9 @@ async def gpt_query(
     messages.append(response_message)
 
     tool_calls = response_message.tool_calls or []
-    case_solved = False
     tools = []
-    while tool_calls:
+    case_solved = False
+    while not case_solved:
         _messages, tools = await _handle_tool_calls(tools, tool_calls) or ([], tools)
         messages.extend(_messages)
         response_message = await __gpt_query(messages, model, tools)
@@ -196,27 +208,14 @@ async def gpt_query(
             break
         messages.append(response_message)
         tool_calls = response_message.tool_calls or []
-        if follow_up_prompt and not case_solved:
-            while not tool_calls:
-                messages.append(OpenAIMessage(role="developer", content=follow_up_prompt.format(**kwargs)))
-                response_message = await __gpt_query(messages, model, tools)
-                if not response_message:
-                    break
-                tool_calls = response_message.tool_calls or []
-                if response_message.content != "RESOLVED":
-                    messages.append(response_message)
-                else:
-                    case_solved = True
-                    break
-        else:
-            case_solved = True
+        for call in messages[-1].tool_calls or []:
+            if call.function.name == closer.function.name:
+                case_solved = True
 
     for message in messages:
         message.tool_calls = None
     return PromptSummary(
-        data=kwargs,
-        messages=[
-            message for message in messages if message.role not in ["function", "tool", "developer"] and message.content
-        ][1:],
+        data={},
+        messages=[m for m in messages[2:] if m.role not in ["tool"] and m.content],
         resolved=case_solved,
     )

@@ -1,6 +1,7 @@
 import base64
 import gzip
 import json
+import logging
 from typing import Optional
 
 from kubernetes_asyncio import client, config
@@ -13,8 +14,10 @@ from infra_agent.models.k8s import (
     KubernetesNodeList,
     KubernetesPodLogs,
     Pod,
-    PodList,
 )
+
+logger = logging.getLogger(__name__)
+
 
 # Label prefixes to filter out from node labels
 EXCLUDED_LABEL_PREFIXES = [
@@ -26,16 +29,16 @@ EXCLUDED_LABEL_PREFIXES = [
     "node-role.kubernetes.io/",
 ]
 
-try:
-    config.load_kube_config()
-except Exception as kube_exc:
+
+async def _load_config():
     try:
-        config.load_incluster_config()
-    except Exception as incluster_exc:
-        raise RuntimeError(f"Failed to load Kubernetes config: kube={kube_exc}, incluster={incluster_exc}")
+        await config.load_incluster_config()
+    except Exception:
+        await config.load_kube_config()
 
 
 async def _filter_node_labels(labels: dict[str, str] | None) -> dict[str, str]:
+    await _load_config()
     """Filter out system labels based on predefined prefixes."""
     if not labels:
         return {}
@@ -49,6 +52,7 @@ async def _filter_node_labels(labels: dict[str, str] | None) -> dict[str, str]:
 
 
 async def _validate_namespace(namespace: str) -> bool:
+    await _load_config()
     async with ApiClient() as api:
         v1 = client.CoreV1Api(api)
         ret = await v1.list_namespace()
@@ -56,6 +60,7 @@ async def _validate_namespace(namespace: str) -> bool:
 
 
 async def list_namespaces() -> KubernetesAnyList:
+    await _load_config()
     async with ApiClient() as api:
         v1 = client.CoreV1Api(api)
         ret = None
@@ -71,6 +76,7 @@ async def list_namespaces() -> KubernetesAnyList:
 
 
 async def list_nodes() -> KubernetesNodeList:
+    await _load_config()
     async with ApiClient() as api:
         v1 = client.CoreV1Api(api)
         ret = None
@@ -93,6 +99,7 @@ async def list_nodes() -> KubernetesNodeList:
 
 
 async def list_pod_containers(namespace: str, pod_name: str) -> KubernetesAnyList:
+    await _load_config()
     async with ApiClient() as api:
         v1 = client.CoreV1Api(api)
         ret = None
@@ -123,6 +130,7 @@ async def list_pod_containers(namespace: str, pod_name: str) -> KubernetesAnyLis
 async def get_pod_logs(
     namespace: str, pod_name: str, container_name: Optional[str] = None, tail_lines: int = 10
 ) -> KubernetesPodLogs:
+    await _load_config()
     async with ApiClient() as api:
         v1 = client.CoreV1Api(api)
         ret = None
@@ -137,15 +145,29 @@ async def get_pod_logs(
                         "container_name": container_name,
                     },
                 )
+
+            pods_in_namespaces = await list_pods_by_namespace(namespace)
+            if pod_name not in pods_in_namespaces.items:
+                raise PromptToolError(
+                    message="No such pod in namespace",
+                    tool_name="get_pod_logs",
+                    inputs={
+                        "namespace": namespace,
+                        "pod_name": pod_name,
+                        "container_name": container_name,
+                    },
+                )
+
             ret = await v1.read_namespaced_pod_log(
                 name=pod_name,
                 namespace=namespace,
                 container=container_name,
                 tail_lines=tail_lines,
             )
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error: {e}")
             raise PromptToolError(
-                message="Failed to get pod logs",
+                message=str(e),
                 tool_name="get_pod_logs",
                 inputs={
                     "namespace": namespace,
@@ -162,6 +184,7 @@ async def get_pod_logs(
 
 
 async def list_pods_by_namespace(namespace: str) -> KubernetesAnyList:
+    await _load_config()
     if not await _validate_namespace(namespace):
         raise PromptToolError(
             message="No such namespace", tool_name="list_pods_by_namespace", inputs={"namespace": namespace}
@@ -180,12 +203,13 @@ async def list_pods_by_namespace(namespace: str) -> KubernetesAnyList:
             raise PromptToolError(
                 message="Failed to list pods", tool_name="list_pods_by_namespace", inputs={"namespace": namespace}
             )
-        data = ret.to_dict()
-        pod_list = PodList.model_validate(data)
-        return PodList(items=[pod.metadata.name for pod in pod_list.items])
+        # data = ret.to_dict()
+
+        return KubernetesAnyList(items=[pod.metadata.name for pod in ret.items])
 
 
 async def delete_pod(namespace: str, pod_name: str) -> SuccessPromptSummary:
+    await _load_config()
     async with ApiClient() as api:
         v1 = client.CoreV1Api(api)
         try:
@@ -212,6 +236,7 @@ async def delete_pod(namespace: str, pod_name: str) -> SuccessPromptSummary:
 
 
 async def get_pod_details(namespace: str, pod_name: str) -> Pod:
+    await _load_config()
     async with ApiClient() as api:
         v1 = client.CoreV1Api(api)
         pod = None
@@ -239,6 +264,7 @@ async def get_pod_details(namespace: str, pod_name: str) -> Pod:
 
 
 async def list_node_pods(node_name: str) -> KubernetesAnyList:
+    await _load_config()
     async with ApiClient() as api:
         v1 = client.CoreV1Api(api)
         pods = None
@@ -248,45 +274,46 @@ async def list_node_pods(node_name: str) -> KubernetesAnyList:
             raise PromptToolError(
                 message="Failed to list node pods", tool_name="list_node_pods", inputs={"node_name": node_name}
             )
-        return PodList(items=[pod.metadata.name for pod in pods.items])
+        return KubernetesAnyList(items=[pod.metadata.name for pod in pods.items])
 
 
-async def get_node_resources(node_name: str) -> dict:
-    async with ApiClient() as api:
-        v1 = client.CoreV1Api(api)
-        node, node_metrics = None, None
-        try:
-            node = await v1.read_node(name=node_name)
-            metrics_api = client.CustomObjectsApi(api)
-            node_metrics = await metrics_api.get_cluster_custom_object("metrics.k8s.io", "v1beta1", "nodes", node_name)
-        except Exception:
-            raise PromptToolError(
-                message="Failed to get node resources", tool_name="get_node_resources", inputs={"node_name": node_name}
-            )
+# async def get_node_resources(node_name: str) -> dict:
+#     await _load_config()
+#     async with ApiClient() as api:
+#         v1 = client.CoreV1Api(api)
+#         node, node_metrics = None, None
+#         try:
+#             node = await v1.read_node(name=node_name)
+#             # metrics_api = client.CustomObjectsApi(api)
+#             # node_metrics = await metrics_api.get_cluster_custom_object("metrics.k8s.io", "v1beta1", "nodes", node_name)
+#         except Exception as e:
+#             raise PromptToolError(
+#                 message="Failed to get node resources", tool_name="get_node_resources", inputs={"node_name": node_name}
+#             )
 
-        capacity = node.status.capacity
-        allocatable = node.status.allocatable
-        usage = node_metrics.get("usage", {}) if node_metrics else {}
+#         capacity = node.status.capacity
+#         allocatable = node.status.allocatable
+#         # usage = node_metrics.get("usage", {}) if node_metrics else {}
 
-        return {
-            "name": node_name,
-            "capacity": {
-                "cpu": capacity.get("cpu", "0"),
-                "memory": capacity.get("memory", "0"),
-                "pods": capacity.get("pods", "0"),
-                "ephemeral-storage": capacity.get("ephemeral-storage", "0"),
-            },
-            "allocatable": {
-                "cpu": allocatable.get("cpu", "0"),
-                "memory": allocatable.get("memory", "0"),
-                "pods": allocatable.get("pods", "0"),
-                "ephemeral-storage": allocatable.get("ephemeral-storage", "0"),
-            },
-            "usage": {"cpu": usage.get("cpu", "0"), "memory": usage.get("memory", "0")} if usage else {},
-        }
+#         return {
+#             "name": node_name,
+#             "capacity": {
+#                 "cpu": capacity.get("cpu", "0"),
+#                 "memory": capacity.get("memory", "0"),
+#                 "pods": capacity.get("pods", "0"),
+#                 "ephemeral-storage": capacity.get("ephemeral-storage", "0"),
+#             },
+#             "allocatable": {
+#                 "cpu": allocatable.get("cpu", "0"),
+#                 "memory": allocatable.get("memory", "0"),
+#                 "pods": allocatable.get("pods", "0"),
+#                 "ephemeral-storage": allocatable.get("ephemeral-storage", "0"),
+#             }
+#         }
 
 
 async def get_pod_helm_release_metadata(namespace: str, pod_name: str) -> dict:
+    await _load_config()
     """
     Use only Kubernetes API to load the latest Helm release metadata for a given namespace and pod.
     Returns decoded metadata dict or error. Now also returns values.yaml if possible.
