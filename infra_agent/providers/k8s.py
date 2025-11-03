@@ -26,6 +26,14 @@ EXCLUDED_LABEL_PREFIXES = [
     "node-role.kubernetes.io/",
 ]
 
+try:
+    config.load_kube_config()
+except Exception as kube_exc:
+    try:
+        config.load_incluster_config()
+    except Exception as incluster_exc:
+        raise RuntimeError(f"Failed to load Kubernetes config: kube={kube_exc}, incluster={incluster_exc}")
+
 
 async def _filter_node_labels(labels: dict[str, str] | None) -> dict[str, str]:
     """Filter out system labels based on predefined prefixes."""
@@ -40,13 +48,6 @@ async def _filter_node_labels(labels: dict[str, str] | None) -> dict[str, str]:
     return result
 
 
-async def _load_config():
-    try:
-        await config.load_kube_config()
-    except Exception:
-        await config.load_incluster_config()
-
-
 async def _validate_namespace(namespace: str) -> bool:
     async with ApiClient() as api:
         v1 = client.CoreV1Api(api)
@@ -55,8 +56,6 @@ async def _validate_namespace(namespace: str) -> bool:
 
 
 async def list_namespaces() -> KubernetesAnyList:
-    await _load_config()
-
     async with ApiClient() as api:
         v1 = client.CoreV1Api(api)
         ret = None
@@ -72,8 +71,6 @@ async def list_namespaces() -> KubernetesAnyList:
 
 
 async def list_nodes() -> KubernetesNodeList:
-    await _load_config()
-
     async with ApiClient() as api:
         v1 = client.CoreV1Api(api)
         ret = None
@@ -96,8 +93,6 @@ async def list_nodes() -> KubernetesNodeList:
 
 
 async def list_pod_containers(namespace: str, pod_name: str) -> KubernetesAnyList:
-    await _load_config()
-
     async with ApiClient() as api:
         v1 = client.CoreV1Api(api)
         ret = None
@@ -128,8 +123,6 @@ async def list_pod_containers(namespace: str, pod_name: str) -> KubernetesAnyLis
 async def get_pod_logs(
     namespace: str, pod_name: str, container_name: Optional[str] = None, tail_lines: int = 10
 ) -> KubernetesPodLogs:
-    await _load_config()
-
     async with ApiClient() as api:
         v1 = client.CoreV1Api(api)
         ret = None
@@ -169,7 +162,6 @@ async def get_pod_logs(
 
 
 async def list_pods_by_namespace(namespace: str) -> KubernetesAnyList:
-    await _load_config()
     if not await _validate_namespace(namespace):
         raise PromptToolError(
             message="No such namespace", tool_name="list_pods_by_namespace", inputs={"namespace": namespace}
@@ -194,8 +186,6 @@ async def list_pods_by_namespace(namespace: str) -> KubernetesAnyList:
 
 
 async def delete_pod(namespace: str, pod_name: str) -> SuccessPromptSummary:
-    await _load_config()
-
     async with ApiClient() as api:
         v1 = client.CoreV1Api(api)
         try:
@@ -222,8 +212,6 @@ async def delete_pod(namespace: str, pod_name: str) -> SuccessPromptSummary:
 
 
 async def get_pod_details(namespace: str, pod_name: str) -> Pod:
-    await _load_config()
-
     async with ApiClient() as api:
         v1 = client.CoreV1Api(api)
         pod = None
@@ -251,8 +239,6 @@ async def get_pod_details(namespace: str, pod_name: str) -> Pod:
 
 
 async def list_node_pods(node_name: str) -> KubernetesAnyList:
-    await _load_config()
-
     async with ApiClient() as api:
         v1 = client.CoreV1Api(api)
         pods = None
@@ -266,8 +252,6 @@ async def list_node_pods(node_name: str) -> KubernetesAnyList:
 
 
 async def get_node_resources(node_name: str) -> dict:
-    await _load_config()
-
     async with ApiClient() as api:
         v1 = client.CoreV1Api(api)
         node, node_metrics = None, None
@@ -307,7 +291,6 @@ async def get_pod_helm_release_metadata(namespace: str, pod_name: str) -> dict:
     Use only Kubernetes API to load the latest Helm release metadata for a given namespace and pod.
     Returns decoded metadata dict or error. Now also returns values.yaml if possible.
     """
-    await _load_config()
     async with ApiClient() as api:
         v1 = client.CoreV1Api(api)
         try:

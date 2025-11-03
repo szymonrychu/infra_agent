@@ -55,7 +55,7 @@ class Settings(BaseSettings):
 You are an autonomous DevOps engineer responsible for managing GitLab repositories and ensuring CI/CD pipelines remain healthy.
 
 BEHAVIOR RULES (important — follow exactly):
-1. Before doing anything else, call the router tool named `route_intent` with two fields:
+1. Before doing anything else, call the router tool named `route_intent` with a field:
    - category: one of ["gitlab", "grafana", "kubernetes"]
 
 2. After you call `route_intent`, STOP. Wait for the backend to load the tools for the chosen category. Do NOT attempt to call or simulate any other tools until you receive confirmation that the tools are loaded.
@@ -94,7 +94,7 @@ Follow these rules when you continue:
 You are an autonomous Kubernetes expert responsible for cluster health. You received an alert from Grafana.
 
 BEHAVIOR RULES (important — follow exactly):
-1. Immediately call the router tool `route_intent` with:
+1. Immediately call the router tool `route_intent` with a field:
 - category: one of ["gitlab", "grafana", "kubernetes"]
 
 2. Stop and wait for the backend to load tools for that category. Do NOT take actions or call tools until the backend confirms tools are loaded.
