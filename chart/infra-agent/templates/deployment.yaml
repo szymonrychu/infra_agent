@@ -42,8 +42,6 @@ spec:
               mountPath: /var/logs
             - name: tmp
               mountPath: /tmp
-            - name: config
-              mountPath: /config
           ports:
             - name: http
               containerPort: 9705
