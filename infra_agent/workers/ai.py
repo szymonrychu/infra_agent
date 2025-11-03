@@ -208,7 +208,7 @@ async def gpt_query(
             break
         messages.append(response_message)
         tool_calls = response_message.tool_calls or []
-        for call in messages[-1].tool_calls or []:
+        for call in tool_calls:
             if call.function.name == closer.function.name:
                 case_solved = True
 
