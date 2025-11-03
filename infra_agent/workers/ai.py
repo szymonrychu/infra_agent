@@ -1,12 +1,13 @@
 import json
 import logging
-from typing import Any, List
+from typing import Any, List, Tuple
 
 from openai import AsyncOpenAI, BadRequestError, RateLimitError
 from ratelimit import limits, sleep_and_retry
 
 from infra_agent.models.ai import OpenAIMessage, OpenAITool, OpenAIToolCall
 from infra_agent.models.generic import PromptSummary, PromptToolError
+from infra_agent.providers.router import router
 from infra_agent.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -24,17 +25,16 @@ def __avoid_ratelimits():
 
 async def __gpt_query(
     messages: List[OpenAIMessage],
-    tools: List[OpenAITool] = [],
     model: str = "gemini-2.5-flash",
+    tools: List[OpenAITool] = [],
 ) -> OpenAIMessage | None:
     client = await _load_config()
     completions_create_kwargs = {
         "model": model,
         "messages": [message.model_dump(exclude_none=True) for message in messages],
     }
-    if tools:
-        completions_create_kwargs["tools"] = [tool.model_dump(exclude_none=True, exclude={"handler"}) for tool in tools]
-        completions_create_kwargs["tool_choice"] = "auto"
+    completions_create_kwargs["tools"] = [tool.model_dump(exclude_none=True, exclude={"handler"}) for tool in tools]
+    completions_create_kwargs["tool_choice"] = "auto"
     raw_ai_message = None
     try:
         __avoid_ratelimits()
@@ -63,31 +63,54 @@ async def __call2log(fname: str, kwargs: dict[str, Any]):
     return f"{fname}({','.join(pretty_function_args)})"
 
 
+async def _run_tool(tool: OpenAITool, args: dict) -> Any:
+    if tool.handler:
+        logger.info(await __call2log(tool.function.name, args))
+        tool_result = await tool.handler(**args)
+        logger.debug(f"tool {tool.function.name} returned: {tool_result}")
+        return tool_result
+    else:
+        logger.warning(f"tool {tool.function.name} didn't expose any handler, skipping!")
+        return {}
+
+
 async def _handle_tool_calls(
-    tool_calls: List[OpenAIToolCall] | None = None, tools: List[OpenAITool] = []
-) -> List[OpenAIMessage] | None:
-    if not _handle_tool_calls:
-        return None
+    tools: List[OpenAITool], tool_calls: List[OpenAIToolCall] | None = None
+) -> Tuple[List[OpenAIMessage], List[OpenAITool]] | None:
     messages = []
+    _tools = [router] + tools
     for tool_call in tool_calls or []:
+        parsed_args = json.loads(tool_call.function.arguments)
+
         tool_found = False
-        for tool in tools:
+        for tool in _tools:
             if tool.function.name == tool_call.function.name:
                 tool_found = True
-                parsed_args = json.loads(tool_call.function.arguments)
                 if tool.handler:
                     try:
-                        logger.info(await __call2log(tool_call.function.name, parsed_args))
-                        tool_result = await tool.handler(**parsed_args)
-                        logger.debug(f"tool {tool_call.function.name} returned: {tool_result}")
-                        messages.append(
-                            OpenAIMessage(
-                                role="tool",
-                                name=tool_call.function.name,
-                                content=json.dumps(tool_result.model_dump(exclude_none=True)),
-                                tool_call_id=tool_call.id,
+                        tool_result = await _run_tool(tool, parsed_args)
+                        if tool_call.function.name == router.function.name:
+                            logger.info("router tool called, adding returned tools to available tools")
+                            tools = tool_result
+                            messages.append(
+                                OpenAIMessage(
+                                    role="tool",
+                                    name=tool_call.function.name,
+                                    content="New tools added to use, please continue.",
+                                    tool_call_id=tool_call.id,
+                                )
                             )
-                        )
+                        else:
+                            messages.append(
+                                OpenAIMessage(
+                                    role="tool",
+                                    name=tool_call.function.name,
+                                    content=json.dumps(
+                                        tool_result.model_dump(exclude_none=True) if tool_result else {}
+                                    ),
+                                    tool_call_id=tool_call.id,
+                                )
+                            )
                     except PromptToolError as exc:
                         logger.error(f"tool {tool_call.function.name} raised an exception: {exc}")
                         messages.append(
@@ -100,17 +123,44 @@ async def _handle_tool_calls(
                         )
                 else:
                     logger.warning(f"tool {tool.function.name} didn't expose any handler, skipping!")
+                    messages.append(
+                        OpenAIMessage(
+                            role="tool",
+                            name=tool_call.function.name,
+                            content=json.dumps(
+                                PromptToolError(
+                                    message="No handler defined for tool",
+                                    tool_name=tool_call.function.name,
+                                    inputs=parsed_args,
+                                ).model_dump(exclude_none=True)
+                            ),
+                            tool_call_id=tool_call.id,
+                        )
+                    )
                 break
         if not tool_found:
-            logger.error(f"couldn't find tool with name {tool_call.function.name} among existing tools!")
-    return messages
+            logger.warning(f"tool {tool_call.function.name} not found in router tools, skipping!")
+            messages.append(
+                OpenAIMessage(
+                    role="tool",
+                    name=tool_call.function.name,
+                    content=json.dumps(
+                        PromptToolError(
+                            message="Tool not found in router",
+                            tool_name=tool_call.function.name,
+                            inputs=parsed_args,
+                        ).model_dump(exclude_none=True)
+                    ),
+                    tool_call_id=tool_call.id,
+                )
+            )
+    return messages, tools
 
 
 async def gpt_query(
     prompt: str,
     system_prompt: str | None = None,
     follow_up_prompt: str | None = None,
-    tools: List[OpenAITool] = [],
     messages: List[OpenAIMessage] = [],
     model: str = "gemini-2.5-flash",
     **kwargs: Any,
@@ -118,7 +168,7 @@ async def gpt_query(
     if not messages and system_prompt:
         messages.append(OpenAIMessage(role="developer", content=system_prompt.format(**kwargs)))
     messages.append(OpenAIMessage(role="user", content=prompt.format(**kwargs)))
-    response_message = await __gpt_query(messages, tools, model)
+    response_message = await __gpt_query(messages, model)
     if response_message and response_message.content:
         logger.info(f"assistant: '{response_message.content}'")
     if not response_message:
@@ -136,9 +186,11 @@ async def gpt_query(
 
     tool_calls = response_message.tool_calls or []
     case_solved = False
+    tools = []
     while tool_calls:
-        messages.extend(await _handle_tool_calls(tool_calls, tools) or [])
-        response_message = await __gpt_query(messages, tools, model)
+        _messages, tools = await _handle_tool_calls(tools, tool_calls) or ([], tools)
+        messages.extend(_messages)
+        response_message = await __gpt_query(messages, model, tools)
         if not response_message:
             break
         messages.append(response_message)
@@ -146,7 +198,7 @@ async def gpt_query(
         if follow_up_prompt and not case_solved:
             while not tool_calls:
                 messages.append(OpenAIMessage(role="developer", content=follow_up_prompt.format(**kwargs)))
-                response_message = await __gpt_query(messages, tools, model)
+                response_message = await __gpt_query(messages, model, tools)
                 if not response_message:
                     break
                 tool_calls = response_message.tool_calls or []

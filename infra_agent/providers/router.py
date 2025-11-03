@@ -6,6 +6,7 @@ from infra_agent.models.ai import (
     OpenAIToolParameter,
     OpenAIToolParameterProperty,
 )
+from infra_agent.models.generic import PromptToolError
 from infra_agent.providers.gl import (
     approve_merge_request,
     create_merge_request_from_branch,
@@ -35,107 +36,99 @@ from infra_agent.providers.k8s import (
     list_pods_by_namespace,
 )
 
-
-async def build_tools() -> List[OpenAITool]:
-    return [
+_route_to_tool_list = {
+    "gitlab": [
         OpenAITool(
             function=OpenAIFunction(
-                name="get_pod_logs",
-                description="Get Kubernetes pod container logs",
+                name="list_opened_merge_requests",
+                description="List opened merge requests in Gitlab project consisting of Helmfile based Helm releases",
+            ),
+            handler=list_opened_merge_requests,
+        ),
+        OpenAITool(
+            function=OpenAIFunction(
+                name="get_merge_request_details",
+                description="Get details of a specific merge request by its ID",
+                parameters=OpenAIToolParameter(
+                    properties={"mr_id": OpenAIToolParameterProperty(description="Merge request id", type="integer")},
+                    required=["mr_id"],
+                ),
+            ),
+            handler=get_merge_request_details,
+        ),
+        OpenAITool(
+            function=OpenAIFunction(
+                name="update_file_and_push",
+                description="Update a file in a branch and push the changes",
                 parameters=OpenAIToolParameter(
                     properties={
-                        "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
-                        "pod_name": OpenAIToolParameterProperty(description="Pod name"),
-                        "container_name": OpenAIToolParameterProperty(description="Pod's container name "),
-                        # "tail_lines": OpenAIToolParameterProperty(type="integer", description="How many lines to get"),
+                        "branch": OpenAIToolParameterProperty(description="Name of the branch to update"),
+                        "file_path": OpenAIToolParameterProperty(description="Path to the file to update"),
+                        "content": OpenAIToolParameterProperty(description="New content for the file"),
+                        "commit_message": OpenAIToolParameterProperty(description="Commit message for the update"),
                     },
-                    required=["namespace", "pod_name", "container_name"],
+                    required=["branch", "file_path", "content", "commit_message"],
                 ),
             ),
-            handler=get_pod_logs,
+            handler=update_file_and_push,
         ),
         OpenAITool(
             function=OpenAIFunction(
-                name="list_pods_by_namespace",
-                description="List Kubernetes pods",
-                parameters=OpenAIToolParameter(
-                    properties={"namespace": OpenAIToolParameterProperty(description="Pod namespace")},
-                    required=["namespace"],
-                ),
-            ),
-            handler=list_pods_by_namespace,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="delete_pod",
-                description="Delete specified pod",
+                name="create_merge_request_from_branch",
+                description="Create a merge request from a branch to the default branch",
                 parameters=OpenAIToolParameter(
                     properties={
-                        "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
-                        "pod_name": OpenAIToolParameterProperty(description="Pod name"),
+                        "source_branch": OpenAIToolParameterProperty(description="Name of the source branch"),
+                        "target_branch": OpenAIToolParameterProperty(description="Name of the target branch"),
+                        "title": OpenAIToolParameterProperty(description="Title of the merge request"),
+                        "description": OpenAIToolParameterProperty(description="Description of the merge request"),
                     },
-                    required=["namespace", "pod_name"],
+                    required=["source_branch", "target_branch", "title", "description"],
                 ),
             ),
-            handler=delete_pod,
+            handler=create_merge_request_from_branch,
         ),
         OpenAITool(
             function=OpenAIFunction(
-                name="get_pod_details",
-                description="Gets pod spec and status details",
+                name="approve_merge_request",
+                description="Approve a merge request by its ID",
+                parameters=OpenAIToolParameter(
+                    properties={"mr_id": OpenAIToolParameterProperty(description="Merge request id", type="integer")},
+                    required=["mr_id"],
+                ),
+            ),
+            handler=approve_merge_request,
+        ),
+        OpenAITool(
+            function=OpenAIFunction(
+                name="get_file_contents",
+                description="Get file contents from repository, branch, and path",
                 parameters=OpenAIToolParameter(
                     properties={
-                        "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
-                        "pod_name": OpenAIToolParameterProperty(description="Pod name"),
+                        "branch": OpenAIToolParameterProperty(description="Branch name"),
+                        "file_path": OpenAIToolParameterProperty(description="Path to the file in the repository"),
                     },
-                    required=["namespace", "pod_name"],
+                    required=["branch", "file_path"],
                 ),
             ),
-            handler=get_pod_details,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(name="list_namespaces", description="List all Kubernetes namespaces"),
-            handler=list_namespaces,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(name="list_nodes", description="List all Kubernetes nodes"), handler=list_nodes
+            handler=get_file_contents,
         ),
         OpenAITool(
             function=OpenAIFunction(
-                name="list_pod_containers",
-                description="List all containers within a pod",
+                name="list_files_in_repository",
+                description="List files in a repository at a specific branch and path",
                 parameters=OpenAIToolParameter(
                     properties={
-                        "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
-                        "pod_name": OpenAIToolParameterProperty(description="Pod name"),
+                        "branch": OpenAIToolParameterProperty(description="Branch name"),
+                        "path": OpenAIToolParameterProperty(description="Path in the repository to list files from"),
                     },
-                    required=["namespace", "pod_name"],
+                    required=["branch"],
                 ),
             ),
-            handler=list_pod_containers,
+            handler=list_files_in_repository,
         ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="list_node_pods",
-                description="Get Kubernetes pod resources and limits",
-                parameters=OpenAIToolParameter(
-                    properties={"node_name": OpenAIToolParameterProperty(description="Node name")},
-                    required=["node_name"],
-                ),
-            ),
-            handler=list_node_pods,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="get_node_resources",
-                description="Get Kubernetes node resource capacity and possible allocatablity",
-                parameters=OpenAIToolParameter(
-                    properties={"node_name": OpenAIToolParameterProperty(description="Node name")},
-                    required=["node_name"],
-                ),
-            ),
-            handler=get_node_resources,
-        ),
+    ],
+    "grafana": [
         OpenAITool(
             function=OpenAIFunction(
                 name="get_pod_container_cpu_usage",
@@ -242,6 +235,106 @@ async def build_tools() -> List[OpenAITool]:
             ),
             handler=list_grafana_alerts,
         ),
+    ],
+    "kubernetes": [
+        OpenAITool(
+            function=OpenAIFunction(
+                name="get_pod_logs",
+                description="Get Kubernetes pod container logs",
+                parameters=OpenAIToolParameter(
+                    properties={
+                        "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
+                        "pod_name": OpenAIToolParameterProperty(description="Pod name"),
+                        "container_name": OpenAIToolParameterProperty(description="Pod's container name "),
+                        # "tail_lines": OpenAIToolParameterProperty(type="integer", description="How many lines to get"),
+                    },
+                    required=["namespace", "pod_name", "container_name"],
+                ),
+            ),
+            handler=get_pod_logs,
+        ),
+        OpenAITool(
+            function=OpenAIFunction(
+                name="list_pods_by_namespace",
+                description="List Kubernetes pods",
+                parameters=OpenAIToolParameter(
+                    properties={"namespace": OpenAIToolParameterProperty(description="Pod namespace")},
+                    required=["namespace"],
+                ),
+            ),
+            handler=list_pods_by_namespace,
+        ),
+        OpenAITool(
+            function=OpenAIFunction(
+                name="delete_pod",
+                description="Delete specified pod",
+                parameters=OpenAIToolParameter(
+                    properties={
+                        "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
+                        "pod_name": OpenAIToolParameterProperty(description="Pod name"),
+                    },
+                    required=["namespace", "pod_name"],
+                ),
+            ),
+            handler=delete_pod,
+        ),
+        OpenAITool(
+            function=OpenAIFunction(
+                name="get_pod_details",
+                description="Gets pod spec and status details",
+                parameters=OpenAIToolParameter(
+                    properties={
+                        "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
+                        "pod_name": OpenAIToolParameterProperty(description="Pod name"),
+                    },
+                    required=["namespace", "pod_name"],
+                ),
+            ),
+            handler=get_pod_details,
+        ),
+        OpenAITool(
+            function=OpenAIFunction(name="list_namespaces", description="List all Kubernetes namespaces"),
+            handler=list_namespaces,
+        ),
+        OpenAITool(
+            function=OpenAIFunction(name="list_nodes", description="List all Kubernetes nodes"), handler=list_nodes
+        ),
+        OpenAITool(
+            function=OpenAIFunction(
+                name="list_pod_containers",
+                description="List all containers within a pod",
+                parameters=OpenAIToolParameter(
+                    properties={
+                        "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
+                        "pod_name": OpenAIToolParameterProperty(description="Pod name"),
+                    },
+                    required=["namespace", "pod_name"],
+                ),
+            ),
+            handler=list_pod_containers,
+        ),
+        OpenAITool(
+            function=OpenAIFunction(
+                name="list_node_pods",
+                description="Get Kubernetes pod resources and limits",
+                parameters=OpenAIToolParameter(
+                    properties={"node_name": OpenAIToolParameterProperty(description="Node name")},
+                    required=["node_name"],
+                ),
+            ),
+            handler=list_node_pods,
+        ),
+        OpenAITool(
+            function=OpenAIFunction(
+                name="get_node_resources",
+                description="Get Kubernetes node resource capacity and possible allocatablity",
+                parameters=OpenAIToolParameter(
+                    properties={"node_name": OpenAIToolParameterProperty(description="Node name")},
+                    required=["node_name"],
+                ),
+            ),
+            handler=get_node_resources,
+        ),
         OpenAITool(
             function=OpenAIFunction(
                 name="get_pod_helm_release_metadata",
@@ -256,93 +349,35 @@ async def build_tools() -> List[OpenAITool]:
             ),
             handler=get_pod_helm_release_metadata,
         ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="list_opened_merge_requests",
-                description="List opened merge requests in Gitlab project consisting of Helmfile based Helm releases",
-            ),
-            handler=list_opened_merge_requests,
+    ],
+}
+
+
+async def _router_tool(category: str) -> List[OpenAITool]:
+    if category not in _route_to_tool_list.keys():
+        raise PromptToolError(
+            message="No such category found",
+            tool_name="route_tools",
+            inputs={
+                "category": category,
+            },
+        )
+    return _route_to_tool_list.get(category, [])
+
+
+router = OpenAITool(
+    function=OpenAIFunction(
+        name="route_tools",
+        description="Get Kubernetes pod container logs",
+        parameters=OpenAIToolParameter(
+            description="Category of the tools to route to",
+            properties={
+                "category": OpenAIToolParameterProperty(
+                    description="Pod namespace", enum=["gitlab", "grafana", "kubernetes"]
+                )
+            },
+            required=["category"],
         ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="get_merge_request_details",
-                description="Get details of a specific merge request by its ID",
-                parameters=OpenAIToolParameter(
-                    properties={"mr_id": OpenAIToolParameterProperty(description="Merge request id", type="integer")},
-                    required=["mr_id"],
-                ),
-            ),
-            handler=get_merge_request_details,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="update_file_and_push",
-                description="Update a file in a branch and push the changes",
-                parameters=OpenAIToolParameter(
-                    properties={
-                        "branch": OpenAIToolParameterProperty(description="Name of the branch to update"),
-                        "file_path": OpenAIToolParameterProperty(description="Path to the file to update"),
-                        "content": OpenAIToolParameterProperty(description="New content for the file"),
-                        "commit_message": OpenAIToolParameterProperty(description="Commit message for the update"),
-                    },
-                    required=["branch", "file_path", "content", "commit_message"],
-                ),
-            ),
-            handler=update_file_and_push,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="create_merge_request_from_branch",
-                description="Create a merge request from a branch to the default branch",
-                parameters=OpenAIToolParameter(
-                    properties={
-                        "source_branch": OpenAIToolParameterProperty(description="Name of the source branch"),
-                        "target_branch": OpenAIToolParameterProperty(description="Name of the target branch"),
-                        "title": OpenAIToolParameterProperty(description="Title of the merge request"),
-                        "description": OpenAIToolParameterProperty(description="Description of the merge request"),
-                    },
-                    required=["source_branch", "target_branch", "title", "description"],
-                ),
-            ),
-            handler=create_merge_request_from_branch,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="approve_merge_request",
-                description="Approve a merge request by its ID",
-                parameters=OpenAIToolParameter(
-                    properties={"mr_id": OpenAIToolParameterProperty(description="Merge request id", type="integer")},
-                    required=["mr_id"],
-                ),
-            ),
-            handler=approve_merge_request,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="get_file_contents",
-                description="Get file contents from repository, branch, and path",
-                parameters=OpenAIToolParameter(
-                    properties={
-                        "branch": OpenAIToolParameterProperty(description="Branch name"),
-                        "file_path": OpenAIToolParameterProperty(description="Path to the file in the repository"),
-                    },
-                    required=["branch", "file_path"],
-                ),
-            ),
-            handler=get_file_contents,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="list_files_in_repository",
-                description="List files in a repository at a specific branch and path",
-                parameters=OpenAIToolParameter(
-                    properties={
-                        "branch": OpenAIToolParameterProperty(description="Branch name"),
-                        "path": OpenAIToolParameterProperty(description="Path in the repository to list files from"),
-                    },
-                    required=["branch"],
-                ),
-            ),
-            handler=list_files_in_repository,
-        ),
-    ]
+    ),
+    handler=_router_tool,
+)

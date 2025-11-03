@@ -5,7 +5,7 @@ from fastapi import FastAPI, Response
 
 from infra_agent.models.gl import GitlabWebhookPayload
 from infra_agent.models.grafana import GrafanaWebhookPayload
-from infra_agent.providers import build_tools
+from infra_agent.providers.router import router
 from infra_agent.settings import settings
 from infra_agent.workers.ai import gpt_query
 
@@ -38,7 +38,6 @@ async def readiness() -> Response:
 
 @app.post("/webhooks/grafana")
 async def grafana_webhook(payload: GrafanaWebhookPayload) -> Response:
-    tools = await build_tools()
     alert_summaries = await payload.summary()
 
     prompt = settings.GRAFANA_WEBHOOK_PROMPT_FORMAT
@@ -50,7 +49,6 @@ async def grafana_webhook(payload: GrafanaWebhookPayload) -> Response:
         prompt,
         system_prompt,
         follow_up_prompt,
-        tools,
         messages,
         model=settings.OPENAI_MODEL,
         alert_summaries=alert_summaries,
@@ -76,13 +74,12 @@ async def gitlab_webhook(payload: GitlabWebhookPayload) -> Response:
         system_prompt = settings.GRAFANA_WEBHOOK_SYSTEM_PROMPT_FORMAT
         follow_up_prompt = settings.GRAFANA_WEBHOOK_FOLLOWUP_PROMPT_FORMAT
 
-        tools = await build_tools()
         messages = []
         result = await gpt_query(
             prompt,
             system_prompt,
             follow_up_prompt,
-            tools,
+            router,
             messages,
             model=settings.OPENAI_MODEL,
             mr=payload.object_attributes.model_dump(exclude_none=True),
