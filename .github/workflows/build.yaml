@@ -117,7 +117,7 @@ jobs:
       - name: Build new container for branch
         run: |
           set -e
-          echo '${{ secrets.GL_REGISTRY_PASSWORD }}' | docker login -u ${{ secrets.GL_REGISTRY_USER }} --password-stdin https://gitlab.com/
+          echo '${{ secrets.GL_REGISTRY_PASSWORD }}' | docker login -u ${{ secrets.GL_REGISTRY_USER }} --password-stdin https://registry.gitlab.com/
 
           docker build -t registry.gitlab.com/szymonrychu/containers/${CONTAINER_NAME}:${{ steps.prep.outputs.short_sha }} .
 
