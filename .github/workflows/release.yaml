@@ -82,5 +82,5 @@ jobs:
 
       - name: Create release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.SZYMONRYCHU_TOKEN }}
         run: gh release create "$GITHUB_REF_NAME"

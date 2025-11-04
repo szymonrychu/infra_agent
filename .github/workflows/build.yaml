@@ -100,11 +100,11 @@ jobs:
         run: |
           export LATEST_REPO_TAG=$(git tag -l --sort=-v:refname "[0-9]*" | head -n1)
           if [ -z "${LATEST_REPO_TAG}" ]; then
-            export LATEST_REPO_TAG="0.0.1"
+            export LATEST_REPO_TAG="0.0.0"
           fi
           export SHORT_SHA=$(echo ${GIT_SHA:0:7})
           export APP_VERSION=${LATEST_REPO_TAG}-${SHORT_SHA}
-          export CHART_VERSION=${LATEST_REPO_TAG}-$(git show -s --format=%ct HEAD)-${SHORT_SHA}
+          export CHART_VERSION=${LATEST_REPO_TAG}-${SHORT_SHA}
           export CONTAINER_VERSION=${GIT_SHA:0:7}
 
           echo "app_version=${APP_VERSION}" >> $GITHUB_OUTPUT
