@@ -132,7 +132,7 @@ jobs:
           helm package \
             --dependency-update "./chart/${CHART_NAME}" \
             --version ${{ steps.prep.outputs.chart_version }} \
-            --app-version ${{ steps.prep.outputs.app_version }} \
+            --app-version ${{ steps.prep.outputs.container_version }} \
             -u -d ./ "./chart/${CHART_NAME}"
 
           curl --request POST \
