@@ -12,16 +12,23 @@ class AlertLabels(BaseModel):
 
 class Alert(BaseModel):
     status: str
-    labels: dict[str, str]
-    annotations: dict[str, str]
+    labels: Dict[str, str]
+    annotations: Dict[str, str]
     startsAt: datetime
     endsAt: datetime
-    generatorURL: HttpUrl
+    # generatorURL is sometimes a relative/query string (e.g. "?orgId=1") so keep as str
+    generatorURL: str
     fingerprint: str
-    silenceURL: HttpUrl
-    dashboardURL: HttpUrl | None = None
-    panelURL: HttpUrl | None = None
+    # use plain strings for URL-like fields to accept both full URLs and relative values
+    silenceURL: str
+    dashboardURL: str | None = None
+    panelURL: str | None = None
+    # numeric values from Grafana (e.g. {"B":22})
     values: Dict[str, float] = Field(default_factory=dict)
+    # Grafana sometimes includes a human readable value string
+    valueString: str | None = None
+    # some payloads include orgId per-alert
+    orgId: int | None = None
 
 
 class GrafanaAlertsSumary(BaseModel):
