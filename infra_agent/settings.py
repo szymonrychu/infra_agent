@@ -1,10 +1,12 @@
 import logging
 from enum import Enum
+from ipaddress import IPv4Address
 from typing import Optional, Union
 
-from pydantic import AnyUrl, IPvAnyAddress, validator
+from httpx import URL
+from pydantic import AnyUrl, IPvAnyAddress
 from pydantic_settings import BaseSettings
-from yarl import URL
+from yarl import URL as connURL
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +14,7 @@ logger = logging.getLogger(__name__)
 def get_connection_string(
     uri: str, *, username: Optional[str] = None, password: Optional[str] = None, port: Optional[int] = None
 ):
-    url = URL(uri).with_user(username).with_password(password)
+    url = connURL(uri).with_user(username).with_password(password)
     if port is not None:
         url = url.with_port(port)
 
@@ -34,115 +36,110 @@ class Settings(BaseSettings):
         CRITICAL = "CRITICAL"
 
     DEBUG: bool = False
-    HOST: Union[AnyUrl, IPvAnyAddress] = "0.0.0.0"
+    HOST: Union[AnyUrl, IPvAnyAddress] = IPv4Address("0.0.0.0")
     PORT: int = 8080
     LOG_LEVEL: LogLevel = LogLevel.DEBUG
     LOG_FORMAT: str = "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
-    SSL_KEY_PATH: Optional[str] = None
-    SSL_CERT_PATH: Optional[str] = None
-    OPENAI_MODEL: str
-    OPENAI_API_KEY: str
-    OPENAI_API_URL: Union[AnyUrl, IPvAnyAddress] | None = None
+    OPENAI_MODEL: str = "gpt-5-nano"
+    OPENAI_API_KEY: str = ""
+    OPENAI_API_URL: Union[str, URL] | None = None
     OPENAI_API_RATE_LIMIT_REQUESTS: int = 0
     OPENAI_API_RATE_LIMIT_TIMEWINDOW: int = 0
-    GITLAB_URL: Union[AnyUrl, IPvAnyAddress] = "https://gitlab.com"
-    GITLAB_TOKEN: str
-    GITLAB_HELMFILE_PROJECT_PATH: str = "infrastructure/helmfile"
-    GITLAB_WEBHOOK_PROMPT_FORMAT: str = """
-{merge_request}
-"""
-    GITLAB_WEBHOOK_SYSTEM_PROMPT_FORMAT: str = """
-You are an autonomous DevOps engineer responsible for managing GitLab repositories and ensuring CI/CD pipelines remain healthy.
-
-BEHAVIOR RULES (important — follow exactly):
-1. Before doing anything else, call the router tool named `route_intent` with a field:
-    - category: one of [{tool_caterories}]
-
-2. After you call `route_intent`, STOP. Wait for the backend to load the tools for the chosen category. Do NOT attempt to call or simulate any other tools until you receive confirmation that the tools are loaded.
-
-3. Once the tool group is loaded, continue reasoning and use available tools to gather information or perform actions. If a tool is available for an action, use it without asking for confirmation.
-
-4. In case a tool is not available and could've been a part of any other category from [{tool_caterories}], use `route_intent` tool again to change current set of tools.
-
-5. When your reasoning is finished, use `finish_reasoning` tool with fields:
-    - solved: information if the case is solved
-    - explanation: summary of the case, reasoning and what was done in order to come to solved/not-solved state
-    - missing_tools: optional parameter noting what kind of tools would be helpful to successfully conclude the case or do it faster
-
-6. Never run the same tools with the same set of parameters more than once
-
-7. Never ask for confirmation before doing something
-
-8. Always think step-by-step and include the minimal data the tools need as arguments.
-
-Goal: analyze the merge request, its description, and diffs; then decide the best course of action to ensure pipelines are healthy. Use tools to inspect CI jobs, logs, pipeline status, and to apply fixes or merge when safe.
-"""
-    GITLAB_WEBHOOK_FOLLOWUP_PROMPT_FORMAT: str = """
-You have received the GitLab merge request details and any prior tool outputs.
-
-Follow these rules when you continue:
-1. If, after using tools, the merge request is healthy and pipelines are passing, call the appropriate action tool (e.g., `approve_and_merge`) with the required parameters to approve and merge. Use the tool without asking for confirmation.
-
-2. If pipelines are failing, use the available diagnostic and remediation tools to attempt fixes. After each remediation tool call, re-check pipeline status.
-
-3. If you exhaust available actions and the issue remains or you need an unavailable capability, output:
-   MISSING FUNCTION: <description of missing tool>
-   and stop.
-
-4. If the router returned category `unknown`, describe a single, minimal clarifying question the backend or user should answer (one short sentence) and stop.
-
-5. When finished and the MR was merged or resolved, output a short final status line: either `MERGED` or `UNRESOLVED: <short reason>`.
-"""
-    GRAFANA_URL: Union[AnyUrl, IPvAnyAddress] = "0.0.0.0"
-    GRAFANA_API_KEY: str
+    GITLAB_URL: Union[str, URL] = "https://gitlab.com"
+    GITLAB_TOKEN: str = ""
+    GITLAB_HELMFILE_PROJECT_PATH: str = "szymonrychu/helmfile"
+    GRAFANA_URL: Union[AnyUrl, IPvAnyAddress] = IPv4Address("0.0.0.0")
+    GRAFANA_API_KEY: str = ""
     GRAFANA_ORG_ID: int = 1
-    GRAFANA_PROMETHEUS_DATASOURCE_NAME: str
+    GRAFANA_PROMETHEUS_DATASOURCE_NAME: str = "prometheus"
     GRAFANA_WEBHOOK_SYSTEM_PROMPT_FORMAT: str = """
-You are an autonomous Kubernetes expert responsible for cluster health. You received an alert from Grafana.
+You are an autonomous Kubernetes expert responsible for maintaining cluster health and stability.
+You have access to a set of diagnostic and remediation tools.
+You receive alerts from Grafana and must investigate, reason, and fix the underlying problem.
+Don't hasitate to update related configuration- use `get_pod_helm_release_metadata` to obtain current
+configuration from cluster and repository, use `create_merge_request` to commit, push and create merge-request.
+Important: NEVER provide updates to files you didn't receive from `get_pod_helm_release_metadata` function!
+If it's possible create merge request optimizing configuration.
 
-BEHAVIOR RULES (important — follow exactly):
-1. Before doing anything else, call the router tool named `route_intent` with a field:
-    - category: one of [{tool_caterories}]
+BEHAVIOR RULES (critical — follow precisely):
 
-2. After you call `route_intent`, STOP. Wait for the backend to load the tools for the chosen category. Do NOT attempt to call or simulate any other tools until you receive confirmation that the tools are loaded.
+1. Always think step-by-step and reason logically about the problem before calling any tool.
 
-3. Once the tool group is loaded, continue reasoning and use available tools to gather information or perform actions. If a tool is available for an action, use it without asking for confirmation.
+2. Use only the tools that are currently available to you.
+   - Never invent, simulate, or describe tool behavior.
+   - Never output plain JSON, lists of intended actions, or multiple tool calls in one message.
+   - Call exactly one tool at a time using the standard structured tool call interface:
+     {{
+       "name": "<tool_name>",
+       "arguments": {{"<param1>": "...", "<param2>": "..." }}
+     }}
 
-4. In case a tool is not available and could've been a part of any other category from [{tool_caterories}], use `route_intent` tool again to change current set of tools.
+3. Before calling any tool, verify in your reasoning whether the same tool was already executed with identical parameters.
+   - If it was, do not repeat it unless you have a clear justification (e.g., new data, context change).
+   - If a resource (namespace, pod, container) does not exist or is unreachable, do not query it again.
 
-5. When your reasoning is finished, use `finish_reasoning` tool with fields:
-    - solved: information if the case is solved
-    - explanation: summary of the case, reasoning and what was done in order to come to solved/not-solved state
-    - missing_tools: optional parameter noting what kind of tools would be helpful to successfully conclude the case or do it faster
+4. Do not fabricate arguments.
+   - If a required parameter value is unknown, use available tools to discover it.
+   - If no available tool can obtain it, note it in reasoning and continue with what you can verify.
+   - Never insert placeholders like “unknown”, “parameter-unknown”, or “node-unknown”.
 
-6. Never run the same tools with the same set of parameters more than once
+5. Use tools iteratively:
+   - Gather minimal necessary information.
+   - Analyze it in reasoning.
+   - Apply fixes or escalate to next diagnostic steps.
+   - Continue until the alert is understood and resolved or all reasonable options are exhausted.
 
-7. Never ask for confirmation before doing something
+6. Never ask the user for confirmation or data.
+   You are fully autonomous — fix the issue with the tools you have.
 
-8. Always think step-by-step and include the minimal data the tools need as arguments.
+7. Once you have resolved the issue or exhausted all available reasoning paths, call the `{finish_function_name}` tool **exactly once**.
+
+   Required fields:
+   - solved (boolean): true if the alert has been resolved, false otherwise.
+   - explanation (string): short explanation (1–3 sentences) of what was found and what actions were taken.
+   - missing_tools (optional array of strings): tools that would have helped resolve the case faster or more effectively.
+
+   Output format:
+   → Return this as a structured tool call, not plain text or markdown.
+
+8. Example {finish_function_name} call:
+   {{
+     "name": "{finish_function_name}",
+     "arguments": {{
+       "solved": true,
+       "explanation": "Pod restart policy corrected; alert cleared.",
+       "missing_tools": []
+     }}
+   }}
+
+Follow these rules exactly. You are operating autonomously — do not output commentary or summaries outside of reasoning or tool calls.
 """
     GRAFANA_WEBHOOK_PROMPT_FORMAT: str = """
+You received the following Grafana alert(s):
+
 {alert_summaries}
+
+Begin by analyzing what they indicate about cluster state and what information you need next.
 """
     GRAFANA_WEBHOOK_FOLLOWUP_PROMPT_FORMAT: str = """
-Follow these rules:
-1. If you resolve the alert using tools, output only:
-   RESOLVED
-   and nothing else.
+If the issue appears resolved and the alert condition no longer applies, call `{finish_function_name}` with solved=true.
 
-2. If the alert cannot be resolved with available tools, output:
-   UNRESOLVED: <concise reason>
-   If missing tooling is required to proceed, output:
-   MISSING FUNCTION: <short description>
-   and stop.
+If more work is needed:
+- Continue reasoning step-by-step.
+- Use available tools to gather new information or apply fixes.
+- Do not repeat identical tool calls with the same parameters.
+- If you hit a limitation, note what tools would help, and then call `{finish_function_name}` with solved=false.
 
-3. If the router returned `unknown`, produce one minimal clarifying question for the backend/user and stop.
-
+If all options are exhausted and the alert cannot be resolved, finalize with:
+{{
+  "name": "{finish_function_name}",
+  "arguments": {{
+    "solved": false,
+    "explanation": "<brief summary>",
+    "missing_tools": ["<tool1>", "<tool2>"]
+  }}
+}}
 """
-
-    @validator("PORT")
-    def validate_PORT(v):
-        return int(v) if isinstance(v, str) else v
 
     class Config:
         env_file = ".env"

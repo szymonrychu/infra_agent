@@ -1,28 +1,23 @@
-from typing import Any, List
+from datetime import datetime
+from typing import Any
 
-from pydantic import BaseModel
-
-from infra_agent.models.ai import OpenAIMessage
-
-
-class PromptSummary(BaseModel):
-    data: dict[str, Any]
-    messages: List[OpenAIMessage]
-    resolved: bool
+from pydantic import BaseModel, ConfigDict
 
 
-class CaseSummary(BaseModel):
-    type: str = "case_summary"
-    solved: bool
-    explanation: str
-    missing_tools: List[str] | None = None
+class InfraAgentBaseModel(BaseModel):
+    """Base model with common configuration"""
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_encoders={datetime: lambda dt: dt.isoformat() if dt else None},
+    )
 
 
-class SuccessPromptSummary(BaseModel):
+class SuccessPromptSummary(InfraAgentBaseModel):
     type: str = "success"
 
 
-class PromptToolErrorModel(BaseModel):
+class PromptToolErrorModel(InfraAgentBaseModel):
     tool_name: str
     error: str
     inputs: dict[str, Any]
@@ -38,10 +33,10 @@ class PromptToolError(Exception):
         self.inputs = inputs
         self.exception = exception
 
-    def model_dump(self, *args, **kwargs) -> Any:
+    def model(self) -> PromptToolErrorModel:
         return PromptToolErrorModel(
             tool_name=self.tool_name,
             error=str(self),
             inputs=self.inputs,
             exception=str(self.exception) if self.exception else None,
-        ).model_dump(*args, **kwargs)
+        )

@@ -1,402 +1,63 @@
 from typing import List
 
 from infra_agent.models.ai import (
+    OpenAICaseSummary,
     OpenAIFunction,
     OpenAITool,
     OpenAIToolParameter,
     OpenAIToolParameterProperty,
+    OpenAIToolParameterPropertyItems,
 )
-from infra_agent.models.generic import CaseSummary, PromptToolError
-from infra_agent.providers.gl import (
-    approve_merge_request,
-    create_merge_request_from_branch,
-    get_file_contents,
-    get_merge_request_details,
-    list_files_in_repository,
-    list_opened_merge_requests,
-    update_file_and_push,
-)
+from infra_agent.models.generic import PromptToolError
+from infra_agent.providers.gl import GitlabMergeRequestFactory
 from infra_agent.providers.grafana import (
+    QueryType,
+    get_cpu_usage_over,
+    get_memory_usage_over,
     get_node_cpu_usage,
     get_node_memory_usage,
-    get_pod_container_cpu_usage,
-    get_pod_container_memory_usage,
-    list_grafana_alerts,
 )
-from infra_agent.providers.k8s import (  # get_node_resources,
-    delete_pod,
+from infra_agent.providers.k8s import (
+    get_helm_release_definition,
+    get_node_details,
+    get_node_resources,
+    get_pod_container_logs,
     get_pod_details,
-    get_pod_helm_release_metadata,
-    get_pod_logs,
+    list_containers_in_pod,
     list_namespaces,
-    list_node_pods,
     list_nodes,
-    list_pod_containers,
-    list_pods_by_namespace,
+    list_pods_in_namespace,
+    list_pods_in_node,
 )
 
-_route_to_tool_list = {
-    "gitlab": [
-        OpenAITool(
-            function=OpenAIFunction(
-                name="list_opened_merge_requests",
-                description="List opened merge requests in Gitlab project consisting of Helmfile based Helm releases",
-            ),
-            handler=list_opened_merge_requests,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="get_merge_request_details",
-                description="Get details of a specific merge request by its ID",
-                parameters=OpenAIToolParameter(
-                    properties={"mr_id": OpenAIToolParameterProperty(description="Merge request id", type="integer")},
-                    required=["mr_id"],
-                ),
-            ),
-            handler=get_merge_request_details,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="update_file_and_push",
-                description="Update a file in a branch and push the changes",
-                parameters=OpenAIToolParameter(
-                    properties={
-                        "branch": OpenAIToolParameterProperty(description="Name of the branch to update"),
-                        "file_path": OpenAIToolParameterProperty(description="Path to the file to update"),
-                        "content": OpenAIToolParameterProperty(description="New content for the file"),
-                        "commit_message": OpenAIToolParameterProperty(description="Commit message for the update"),
-                    },
-                    required=["branch", "file_path", "content", "commit_message"],
-                ),
-            ),
-            handler=update_file_and_push,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="create_merge_request_from_branch",
-                description="Create a merge request from a branch to the default branch",
-                parameters=OpenAIToolParameter(
-                    properties={
-                        "source_branch": OpenAIToolParameterProperty(description="Name of the source branch"),
-                        "target_branch": OpenAIToolParameterProperty(description="Name of the target branch"),
-                        "title": OpenAIToolParameterProperty(description="Title of the merge request"),
-                        "description": OpenAIToolParameterProperty(description="Description of the merge request"),
-                    },
-                    required=["source_branch", "target_branch", "title", "description"],
-                ),
-            ),
-            handler=create_merge_request_from_branch,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="approve_merge_request",
-                description="Approve a merge request by its ID",
-                parameters=OpenAIToolParameter(
-                    properties={"mr_id": OpenAIToolParameterProperty(description="Merge request id", type="integer")},
-                    required=["mr_id"],
-                ),
-            ),
-            handler=approve_merge_request,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="get_file_contents",
-                description="Get file contents from repository, branch, and path",
-                parameters=OpenAIToolParameter(
-                    properties={
-                        "branch": OpenAIToolParameterProperty(description="Branch name"),
-                        "file_path": OpenAIToolParameterProperty(description="Path to the file in the repository"),
-                    },
-                    required=["branch", "file_path"],
-                ),
-            ),
-            handler=get_file_contents,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="list_files_in_repository",
-                description="List files in a repository at a specific branch and path",
-                parameters=OpenAIToolParameter(
-                    properties={
-                        "branch": OpenAIToolParameterProperty(description="Branch name"),
-                        "path": OpenAIToolParameterProperty(description="Path in the repository to list files from"),
-                    },
-                    required=["branch"],
-                ),
-            ),
-            handler=list_files_in_repository,
-        ),
-    ],
-    "grafana": [
-        OpenAITool(
-            function=OpenAIFunction(
-                name="get_pod_container_cpu_usage",
-                description="Get Kubernetes pod container cpu usage from Prometheus- returns dict(timestamp, datapoint)",
-                parameters=OpenAIToolParameter(
-                    properties={
-                        "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
-                        "pod_name": OpenAIToolParameterProperty(description="Pod name"),
-                        "container_name": OpenAIToolParameterProperty(description="Pod's container name"),
-                        # "from_s": OpenAIToolParameterProperty(
-                        #     description="Starting epoch time for Prometheus query", type="integer"
-                        # ),
-                        # "to_s": OpenAIToolParameterProperty(
-                        #     description="Ending epoch time for Prometheus query (defaults to current timestamp)",
-                        #     type="integer",
-                        # ),
-                        # "steps": OpenAIToolParameterProperty(
-                        #     description="Amount to steps to get between to_s and from_s (defaults to step every 60s)",
-                        #     type="integer",
-                        # ),
-                    },
-                    required=["namespace", "pod_name", "container_name"],
-                ),
-            ),
-            handler=get_pod_container_cpu_usage,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="get_pod_container_memory_usage",
-                description="Get Kubernetes pod container memory usage from Prometheus- returns dict(timestamp, datapoint)",
-                parameters=OpenAIToolParameter(
-                    properties={
-                        "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
-                        "pod_name": OpenAIToolParameterProperty(description="Pod name"),
-                        "container_name": OpenAIToolParameterProperty(description="Pod's container name"),
-                        # "from_s": OpenAIToolParameterProperty(
-                        #     description="Starting epoch time for Prometheus query", type="integer"
-                        # ),
-                        # "to_s": OpenAIToolParameterProperty(
-                        #     description="Ending epoch time for Prometheus query (defaults to current timestamp)",
-                        #     type="integer",
-                        # ),
-                        # "steps": OpenAIToolParameterProperty(
-                        #     description="Amount to steps to get between to_s and from_s (defaults to step every 60s)",
-                        #     type="integer",
-                        # ),
-                    },
-                    required=["namespace", "pod_name", "container_name"],
-                ),
-            ),
-            handler=get_pod_container_memory_usage,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="get_node_cpu_usage",
-                description="Get node cpu usage from Prometheus- returns dict(timestamp, datapoint)",
-                parameters=OpenAIToolParameter(
-                    properties={
-                        "node_name": OpenAIToolParameterProperty(description="Node name"),
-                        # "from_s": OpenAIToolParameterProperty(
-                        #     description="Starting epoch time for Prometheus query", type="integer"
-                        # ),
-                        # "to_s": OpenAIToolParameterProperty(
-                        #     description="Ending epoch time for Prometheus query (defaults to current timestamp)",
-                        #     type="integer",
-                        # ),
-                        # "steps": OpenAIToolParameterProperty(
-                        #     description="Amount to steps to get between to_s and from_s (defaults to step every 60s)",
-                        #     type="integer",
-                        # ),
-                    },
-                    required=["node_name"],
-                ),
-            ),
-            handler=get_node_cpu_usage,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="get_node_memory_usage",
-                description="Get node memory usage from Prometheus- returns dict(timestamp, datapoint)",
-                parameters=OpenAIToolParameter(
-                    properties={
-                        "node_name": OpenAIToolParameterProperty(description="Node name"),
-                        # "from_s": OpenAIToolParameterProperty(
-                        #     description="Starting epoch time for Prometheus query", type="integer"
-                        # ),
-                        # "to_s": OpenAIToolParameterProperty(
-                        #     description="Ending epoch time for Prometheus query (defaults to current timestamp)",
-                        #     type="integer",
-                        # ),
-                        # "steps": OpenAIToolParameterProperty(
-                        #     description="Amount to steps to get between to_s and from_s (defaults to step every 60s)"
-                        # ),
-                    },
-                    required=["node_name"],
-                ),
-            ),
-            handler=get_node_memory_usage,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="list_grafana_alerts",
-                description="Get list of current Grafana alerts",
-            ),
-            handler=list_grafana_alerts,
-        ),
-    ],
-    "kubernetes": [
-        OpenAITool(
-            function=OpenAIFunction(
-                name="get_pod_logs",
-                description="Get Kubernetes pod container logs",
-                parameters=OpenAIToolParameter(
-                    properties={
-                        "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
-                        "pod_name": OpenAIToolParameterProperty(description="Pod name"),
-                        "container_name": OpenAIToolParameterProperty(description="Pod's container name "),
-                        # "tail_lines": OpenAIToolParameterProperty(type="integer", description="How many lines to get"),
-                    },
-                    required=["namespace", "pod_name", "container_name"],
-                ),
-            ),
-            handler=get_pod_logs,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="list_pods_by_namespace",
-                description="List Kubernetes pods",
-                parameters=OpenAIToolParameter(
-                    properties={"namespace": OpenAIToolParameterProperty(description="Pod namespace")},
-                    required=["namespace"],
-                ),
-            ),
-            handler=list_pods_by_namespace,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="delete_pod",
-                description="Delete specified pod",
-                parameters=OpenAIToolParameter(
-                    properties={
-                        "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
-                        "pod_name": OpenAIToolParameterProperty(description="Pod name"),
-                    },
-                    required=["namespace", "pod_name"],
-                ),
-            ),
-            handler=delete_pod,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="get_pod_details",
-                description="Gets pod spec and status details",
-                parameters=OpenAIToolParameter(
-                    properties={
-                        "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
-                        "pod_name": OpenAIToolParameterProperty(description="Pod name"),
-                    },
-                    required=["namespace", "pod_name"],
-                ),
-            ),
-            handler=get_pod_details,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(name="list_namespaces", description="List all Kubernetes namespaces"),
-            handler=list_namespaces,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(name="list_nodes", description="List all Kubernetes nodes"), handler=list_nodes
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="list_pod_containers",
-                description="List all containers within a pod",
-                parameters=OpenAIToolParameter(
-                    properties={
-                        "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
-                        "pod_name": OpenAIToolParameterProperty(description="Pod name"),
-                    },
-                    required=["namespace", "pod_name"],
-                ),
-            ),
-            handler=list_pod_containers,
-        ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="list_node_pods",
-                description="Get Kubernetes pod resources and limits",
-                parameters=OpenAIToolParameter(
-                    properties={"node_name": OpenAIToolParameterProperty(description="Node name")},
-                    required=["node_name"],
-                ),
-            ),
-            handler=list_node_pods,
-        ),
-        # OpenAITool(
-        #     function=OpenAIFunction(
-        #         name="get_node_resources",
-        #         description="Get Kubernetes node resource capacity and possible allocatablity",
-        #         parameters=OpenAIToolParameter(
-        #             properties={"node_name": OpenAIToolParameterProperty(description="Node name")},
-        #             required=["node_name"],
-        #         ),
-        #     ),
-        #     handler=get_node_resources,
-        # ),
-        OpenAITool(
-            function=OpenAIFunction(
-                name="get_pod_helm_release_metadata",
-                description="Gets latest Helm release metadata for a given pod",
-                parameters=OpenAIToolParameter(
-                    properties={
-                        "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
-                        "pod_name": OpenAIToolParameterProperty(description="Pod name"),
-                    },
-                    required=["namespace", "pod_name"],
-                ),
-            ),
-            handler=get_pod_helm_release_metadata,
-        ),
-    ],
-}
-
-tool_categories = list(_route_to_tool_list.keys())
-
-
-async def _router_tool(category: str) -> List[OpenAITool]:
-    if category not in tool_categories:
-        raise PromptToolError(
-            message="No such category found",
-            tool_name="route_tools",
-            inputs={
-                "category": category,
-            },
-        )
-    return _route_to_tool_list.get(category, [])
+_merge_request_factory = GitlabMergeRequestFactory()
 
 
 async def _closer_tool(
     solved: bool,
     explanation: str,
     missing_tools: List[str] | None = None,
-) -> CaseSummary:
-    return CaseSummary(
+) -> OpenAICaseSummary:
+    if not explanation:
+        raise PromptToolError(
+            message="Not possible to close conversation without meaningful explanation and conversation summary!",
+            tool_name="finish",
+            inputs={
+                "solved": solved,
+                "explanation": explanation,
+                "missing_tools": missing_tools,
+            },
+        )
+    return OpenAICaseSummary(
         solved=solved,
         explanation=explanation,
         missing_tools=missing_tools or [],
     )
 
 
-router = OpenAITool(
-    function=OpenAIFunction(
-        name="route_intent",
-        description="Route user requests to the correct tool group.",
-        parameters=OpenAIToolParameter(
-            properties={
-                "category": OpenAIToolParameterProperty(
-                    description="Category of the tools to route to", enum=tool_categories
-                )
-            },
-            required=["category"],
-        ),
-    ),
-    handler=_router_tool,
-)
-
 closer = OpenAITool(
     function=OpenAIFunction(
-        name="finish_reasoning",
+        name="finish",
         description="Run the function to finish the case and provide final answer to the user.",
         parameters=OpenAIToolParameter(
             properties={
@@ -411,7 +72,7 @@ closer = OpenAITool(
                 "missing_tools": OpenAIToolParameterProperty(
                     description="List of tools that would be useful to solve the case, but are not available",
                     type="array",
-                    items={"type": "string"},
+                    items=OpenAIToolParameterPropertyItems(type="string"),
                 ),
             },
             required=["solved", "explanation"],
@@ -419,3 +80,277 @@ closer = OpenAITool(
     ),
     handler=_closer_tool,
 )
+
+tools = [
+    closer,
+    OpenAITool(
+        function=OpenAIFunction(
+            name="get_pod_container_logs",
+            description="Get Kubernetes pod container logs",
+            parameters=OpenAIToolParameter(
+                properties={
+                    "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
+                    "pod_name": OpenAIToolParameterProperty(description="Pod name"),
+                    "container_name": OpenAIToolParameterProperty(description="Pod's container name "),
+                    # "tail_lines": OpenAIToolParameterProperty(type="integer", description="How many lines to get"),
+                },
+                required=["namespace", "pod_name", "container_name"],
+            ),
+        ),
+        handler=get_pod_container_logs,
+    ),
+    OpenAITool(
+        function=OpenAIFunction(
+            name="list_pods_in_namespace",
+            description="List Kubernetes pods",
+            parameters=OpenAIToolParameter(
+                properties={"namespace": OpenAIToolParameterProperty(description="Pod namespace")},
+                required=["namespace"],
+            ),
+        ),
+        handler=list_pods_in_namespace,
+    ),
+    OpenAITool(
+        function=OpenAIFunction(
+            name="get_pod_details",
+            description="Gets pod spec and status details",
+            parameters=OpenAIToolParameter(
+                properties={
+                    "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
+                    "pod_name": OpenAIToolParameterProperty(description="Pod name"),
+                },
+                required=["namespace", "pod_name"],
+            ),
+        ),
+        handler=get_pod_details,
+    ),
+    OpenAITool(
+        function=OpenAIFunction(name="list_namespaces", description="List all Kubernetes namespaces"),
+        handler=list_namespaces,
+    ),
+    OpenAITool(function=OpenAIFunction(name="list_nodes", description="List all Kubernetes nodes"), handler=list_nodes),
+    OpenAITool(
+        function=OpenAIFunction(
+            name="get_node_details",
+            description="Get details about node in Kubernetes",
+            parameters=OpenAIToolParameter(
+                properties={
+                    "node_name": OpenAIToolParameterProperty(description="Node name"),
+                    "include_labels": OpenAIToolParameterProperty(
+                        description="Flag whether to include node labels (enable only if needed)", type="boolean"
+                    ),
+                    "include_annotations": OpenAIToolParameterProperty(
+                        description="Flag whether to include node annotations (enable only if needed)", type="boolean"
+                    ),
+                },
+                required=["node_name"],
+            ),
+        ),
+        handler=get_node_details,
+    ),
+    OpenAITool(
+        function=OpenAIFunction(
+            name="list_containers_in_pod",
+            description="List all containers within a pod",
+            parameters=OpenAIToolParameter(
+                properties={
+                    "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
+                    "pod_name": OpenAIToolParameterProperty(description="Pod name"),
+                },
+                required=["namespace", "pod_name"],
+            ),
+        ),
+        handler=list_containers_in_pod,
+    ),
+    OpenAITool(
+        function=OpenAIFunction(
+            name="list_pods_in_node",
+            description="Get Kubernetes pod resources and limits",
+            parameters=OpenAIToolParameter(
+                properties={"node_name": OpenAIToolParameterProperty(description="Node name")},
+                required=["node_name"],
+            ),
+        ),
+        handler=list_pods_in_node,
+    ),
+    OpenAITool(
+        function=OpenAIFunction(
+            name="get_node_resources",
+            description="Get Kubernetes node resource capacity and possible allocatablity",
+            parameters=OpenAIToolParameter(
+                properties={"node_name": OpenAIToolParameterProperty(description="Node name")},
+                required=["node_name"],
+            ),
+        ),
+        handler=get_node_resources,
+    ),
+    OpenAITool(
+        function=OpenAIFunction(
+            name="get_pod_helm_release_metadata",
+            description="Gets latest Helm release metadata along with default and override values.yaml files used in repository to customize the release",
+            parameters=OpenAIToolParameter(
+                properties={
+                    "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
+                    "pod_name": OpenAIToolParameterProperty(description="Pod name"),
+                },
+                required=["namespace", "pod_name"],
+            ),
+        ),
+        handler=get_helm_release_definition,
+    ),
+    OpenAITool(
+        function=OpenAIFunction(
+            name="get_cpu_usage_over",
+            description="Allows to get min/avg/max container CPU usage in CPUs over given time in hours from now",
+            parameters=OpenAIToolParameter(
+                properties={
+                    "query_type": OpenAIToolParameterProperty(description="Pod namespace", enum=QueryType.values()),
+                    "hours": OpenAIToolParameterProperty(description="Pod namespace", type="integer"),
+                    "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
+                    "pod_name": OpenAIToolParameterProperty(description="Pod name"),
+                    "container_name": OpenAIToolParameterProperty(description="Pod's container name"),
+                },
+                required=["query_type", "hours", "namespace", "pod_name", "container_name"],
+            ),
+        ),
+        handler=get_cpu_usage_over,
+    ),
+    OpenAITool(
+        function=OpenAIFunction(
+            name="get_memory_usage_over",
+            description="Allows to get min/avg/max container memory usage in MBs over given time in hours from now",
+            parameters=OpenAIToolParameter(
+                properties={
+                    "query_type": OpenAIToolParameterProperty(description="Pod namespace", enum=QueryType.values()),
+                    "hours": OpenAIToolParameterProperty(description="Pod namespace", type="integer"),
+                    "namespace": OpenAIToolParameterProperty(description="Pod namespace"),
+                    "pod_name": OpenAIToolParameterProperty(description="Pod name"),
+                    "container_name": OpenAIToolParameterProperty(description="Pod's container name"),
+                },
+                required=["query_type", "hours", "namespace", "pod_name", "container_name"],
+            ),
+        ),
+        handler=get_memory_usage_over,
+    ),
+    OpenAITool(
+        function=OpenAIFunction(
+            name="get_node_cpu_usage_from_grafana",
+            description="Get node cpu usage from Prometheus- returns dict(timestamp, datapoint)",
+            parameters=OpenAIToolParameter(
+                properties={
+                    "node_name": OpenAIToolParameterProperty(description="Node name"),
+                    # "from_s": OpenAIToolParameterProperty(
+                    #     description="Starting epoch time for Prometheus query", type="integer"
+                    # ),
+                    # "to_s": OpenAIToolParameterProperty(
+                    #     description="Ending epoch time for Prometheus query (defaults to current timestamp)",
+                    #     type="integer",
+                    # ),
+                    # "steps": OpenAIToolParameterProperty(
+                    #     description="Amount to steps to get between to_s and from_s (defaults to step every 60s)",
+                    #     type="integer",
+                    # ),
+                },
+                required=["node_name"],
+            ),
+        ),
+        handler=get_node_cpu_usage,
+    ),
+    OpenAITool(
+        function=OpenAIFunction(
+            name="get_node_memory_usage_from_grafana",
+            description="Get node memory usage from Prometheus- returns dict(timestamp, datapoint)",
+            parameters=OpenAIToolParameter(
+                properties={
+                    "node_name": OpenAIToolParameterProperty(description="Node name"),
+                    # "from_s": OpenAIToolParameterProperty(
+                    #     description="Starting epoch time for Prometheus query", type="integer"
+                    # ),
+                    # "to_s": OpenAIToolParameterProperty(
+                    #     description="Ending epoch time for Prometheus query (defaults to current timestamp)",
+                    #     type="integer",
+                    # ),
+                    # "steps": OpenAIToolParameterProperty(
+                    #     description="Amount to steps to get between to_s and from_s (defaults to step every 60s)"
+                    # ),
+                },
+                required=["node_name"],
+            ),
+        ),
+        handler=get_node_memory_usage,
+    ),
+    # OpenAITool(
+    #     function=OpenAIFunction(
+    #         name="list_alerts_in_grafana",
+    #         description="Get list of current Grafana alerts",
+    #     ),
+    #     handler=list_grafana_alerts,
+    # ),
+    # OpenAITool(
+    #     function=OpenAIFunction(
+    #         name="create_merge_request",
+    #         description="Commits file updates into repository and creates merge requests from them",
+    #         parameters=OpenAIToolParameter(
+    #             properties={
+    #                 "merge_request_branch": OpenAIToolParameterProperty(description="branch for merge request"),
+    #                 "commit_message": OpenAIToolParameterProperty(description="meaningful commit message (use semantic commits)"),
+    #                 "title": OpenAIToolParameterProperty(description="Title of the merge request (use semantic commits)"),
+    #                 "description": OpenAIToolParameterProperty(description="Meaninful description of the merge request along with data and reasoning backing it up"),
+    #                 "files_updated": OpenAIToolParameterProperty(
+    #                     type = 'object',
+    #                     description = 'dict, where key is filepath and value contains file contents that should be updated in the merge request. Do NOT pass empty objects or arrays.',
+    #                     additional_properties = { "type": "string" },
+    #                     min_properties = 1
+    #                 )
+    #             },
+    #             required=["merge_request_branch", "commit_message", "title", "description", "files_updated"],
+    #         ),
+    #     ),
+    #     handler=create_merge_request,
+    # ),
+    OpenAITool(
+        function=OpenAIFunction(
+            description="Allows to create merge request. IMPORTANT: `start_merge_request` tool must be run before running `add_file_to_merge_request` and `commit_and_push_merge_request`",
+            name="start_merge_request",
+            parameters=OpenAIToolParameter(
+                properties={
+                    "title": OpenAIToolParameterProperty(description="Title of the merge request"),
+                    "description": OpenAIToolParameterProperty(description="Description of the merge request"),
+                },
+                required=["title", "description"],
+            ),
+        ),
+        handler=_merge_request_factory.start_merge_request,
+    ),
+    OpenAITool(
+        function=OpenAIFunction(
+            description="Allows to add file update to merge request. Can be run multiple times to add multiple files in one commit. IMPORTANT: `add_file_to_merge_request` requires `start_merge_request` to be run first",
+            name="add_file_to_merge_request",
+            parameters=OpenAIToolParameter(
+                properties={
+                    "file_path": OpenAIToolParameterProperty(description="Path of the file, that gets updated"),
+                    "file_contents": OpenAIToolParameterProperty(
+                        description="New contents of the file thats being updated"
+                    ),
+                },
+                required=["file_path", "file_contents"],
+            ),
+        ),
+        handler=_merge_request_factory.add_file_to_merge_request,
+    ),
+    OpenAITool(
+        function=OpenAIFunction(
+            description="Allows to group file updates into commit, which then is pushed. IMPORTANT: `commit_and_push_merge_request` requires `start_merge_request` to be run once and `add_file_to_merge_request` to be run at least once!",
+            name="commit_and_push_merge_request",
+            parameters=OpenAIToolParameter(
+                properties={
+                    "commit_message": OpenAIToolParameterProperty(
+                        description="Message in a commit that's getting pushed to repository"
+                    ),
+                },
+                required=["commit_message"],
+            ),
+        ),
+        handler=_merge_request_factory.commit_and_push_merge_request,
+    ),
+]

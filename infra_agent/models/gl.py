@@ -1,38 +1,116 @@
 from typing import List, Optional
 
-from pydantic import BaseModel
+import gitlab
+from pydantic import Field
+
+from infra_agent.models.generic import InfraAgentBaseModel, PromptToolError
+from infra_agent.models.gl import GitlabFile
+from infra_agent.settings import settings
+
+gl = gitlab.Gitlab(str(settings.GITLAB_URL), private_token=settings.GITLAB_TOKEN)
 
 
-class GitlabMergeRequest(BaseModel):
-    id: int
+async def list_files_in_repository(branch: str, path: str = "") -> List[GitlabFile]:
+    """List files in repository for a given branch and path."""
+    project = gl.projects.get(settings.GITLAB_HELMFILE_PROJECT_PATH)
+    files = project.repository_tree(path=path, ref=branch, all=True, recursive=True)
+    result = []
+    for f in files:
+        result.append(
+            GitlabFile(
+                file_path=f.get("path", ""),
+                file_name=f.get("name", ""),
+                size=f.get("size", None),
+                encoding=None,
+                content=None,
+                ref=branch,
+                blob_id=f.get("id", None),
+                commit_id=None,
+                last_commit_id=None,
+                execute_filemode=f.get("mode", None) == "100755",
+            )
+        )
+    return result
+
+
+class GitlabMergeRequest(InfraAgentBaseModel):
+    id: int | None = None
     title: str
-    action: str | None
-    description: Optional[str] = None
-    state: str
-    created_at: str
-    updated_at: str
-    merged_by: Optional[str] = None
-    merged_at: Optional[str] = None
-    closed_by: Optional[str] = None
-    closed_at: Optional[str] = None
+    state: str = "opened"
+    description: str
     target_branch: str
     source_branch: str
+    merge_request_files: dict[str, str] = Field(default={}, exclude=True)
+
+    async def add_files(self, file_path: str, file_contents: str):
+        self.merge_request_files[file_path] = file_contents
+
+    async def commit_and_push(self, commit_message: str):
+        project = gl.projects.get(settings.GITLAB_HELMFILE_PROJECT_PATH)
+        existing_files = [f.file_path for f in await list_files_in_repository(self.source_branch)]
+        commit_actions = []
+        for file_path, file_contents in self.merge_request_files.items():
+            commit_actions.append(
+                {
+                    "action": "update" if file_path in existing_files else "create",
+                    "file_path": file_path,
+                    "content": file_contents,
+                }
+            )
+        try:
+            project.commits.create(
+                {
+                    "commit_message": commit_message,
+                    "author_email": "ai",
+                    "author_name": "ai",
+                    "actions": commit_actions,
+                    "branch": self.target_branch,
+                    "start_branch": self.source_branch,
+                }
+            )
+        except Exception as e:
+            raise PromptToolError(
+                message=f"Problem creating commit! {e}",
+                tool_name="create_merge_request",
+                inputs={
+                    "commit_message": commit_message,
+                },
+            )
+
+        try:
+            project.mergerequests.create(
+                {
+                    "source_branch": self.target_branch,
+                    "target_branch": self.source_branch,
+                    "title": self.title,
+                    "description": self.description,
+                    "labels": "ai,automerge",
+                }
+            )
+        except Exception as e:
+            raise PromptToolError(
+                message=f"Problem creating merge request from commit! {e}",
+                tool_name="create_merge_request",
+                inputs={
+                    "commit_message": commit_message,
+                },
+            )
 
 
-class GitlabMergeRequestList(BaseModel):
+class GitlabMergeRequestList(InfraAgentBaseModel):
     """List of Gitlab merge requests"""
 
     items: List[GitlabMergeRequest]
 
 
-class GitlabWebhookPayload(BaseModel):
+class GitlabWebhookPayload(InfraAgentBaseModel):
     object_kind: str
     user: dict
     project: dict
     object_attributes: GitlabMergeRequest
 
 
-class GitlabCommit(BaseModel):
+class GitlabCommit(InfraAgentBaseModel):
     id: str
     short_id: Optional[str] = None
     title: Optional[str] = None
@@ -47,7 +125,7 @@ class GitlabCommit(BaseModel):
     web_url: Optional[str] = None
 
 
-class GitlabRepository(BaseModel):
+class GitlabRepository(InfraAgentBaseModel):
     id: int
     name: str
     description: Optional[str] = None
@@ -59,7 +137,7 @@ class GitlabRepository(BaseModel):
     last_activity_at: Optional[str] = None
 
 
-class GitlabFile(BaseModel):
+class GitlabFile(InfraAgentBaseModel):
     file_path: str
     file_name: str
     size: Optional[int] = None

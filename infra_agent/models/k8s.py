@@ -1,28 +1,18 @@
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
+
+from infra_agent.models.generic import InfraAgentBaseModel
 
 
-class KubernetesModel(BaseModel):
-    """Base model with common configuration"""
-
-    model_config = ConfigDict(
-        populate_by_name=True,
-        ser_json_bytes="base64",
-        json_schema_serialization_defaults=True,
-        json_encoders={datetime: lambda dt: dt.isoformat() if dt else None},
-    )
-
-
-class NodeAddress(KubernetesModel):
+class NodeAddress(InfraAgentBaseModel):
     """Represents a node address in Kubernetes"""
 
     type: str
     address: str
 
 
-class NodeSystemInfo(KubernetesModel):
+class NodeSystemInfo(InfraAgentBaseModel):
     """Information about the node's system"""
 
     machine_id: Optional[str] = Field(None, alias="machineID")
@@ -37,7 +27,7 @@ class NodeSystemInfo(KubernetesModel):
     architecture: Optional[str] = Field(None, alias="architecture")
 
 
-class NodeCondition(KubernetesModel):
+class NodeCondition(InfraAgentBaseModel):
     """Represents a node condition"""
 
     type: str
@@ -58,7 +48,7 @@ class NodeCondition(KubernetesModel):
     #     return self.last_transition_time
 
 
-class NodeStatus(KubernetesModel):
+class NodeStatus(InfraAgentBaseModel):
     """Status information about the node"""
 
     capacity: Optional[dict[str, str]] = Field(default_factory=dict)
@@ -71,7 +61,7 @@ class NodeStatus(KubernetesModel):
     # volumes_attached: Optional[List[Any]] = Field(None, alias="volumesAttached")
 
 
-class NodeSpec(KubernetesModel):
+class NodeSpec(InfraAgentBaseModel):
     """Node specification"""
 
     pod_cidr: Optional[str] = Field(None, alias="podCIDR")
@@ -81,7 +71,7 @@ class NodeSpec(KubernetesModel):
     taints: Optional[List[dict]] = None
 
 
-class NodeMetadata(KubernetesModel):
+class NodeMetadata(InfraAgentBaseModel):
     """Node metadata"""
 
     name: str
@@ -101,7 +91,7 @@ class NodeMetadata(KubernetesModel):
     #     return self.deletion_timestamp
 
 
-class Node(KubernetesModel):
+class Node(InfraAgentBaseModel):
     """Represents a Kubernetes node"""
 
     metadata: NodeMetadata
@@ -109,14 +99,14 @@ class Node(KubernetesModel):
     status: Optional[NodeStatus] = None
 
 
-class KubernetesNodeList(KubernetesModel):
+class KubernetesNodeList(InfraAgentBaseModel):
     """List of Kubernetes nodes"""
 
     items: List[Node]
 
 
 # Pod-related models
-class ContainerPort(KubernetesModel):
+class ContainerPort(InfraAgentBaseModel):
     """Container port specification"""
 
     name: Optional[str] = None
@@ -124,14 +114,14 @@ class ContainerPort(KubernetesModel):
     protocol: Optional[str] = "TCP"
 
 
-class ResourceRequirements(KubernetesModel):
+class ResourceRequirements(InfraAgentBaseModel):
     """Container resource requirements"""
 
     limits: Optional[Dict[str, str]] = None
     requests: Optional[Dict[str, str]] = None
 
 
-class ContainerState(KubernetesModel):
+class ContainerState(InfraAgentBaseModel):
     """Container state information"""
 
     # running: Optional[Dict[str, datetime]] = None
@@ -139,7 +129,7 @@ class ContainerState(KubernetesModel):
     waiting: Optional[Dict[str, str]] = None
 
 
-class ContainerStatus(KubernetesModel):
+class ContainerStatus(InfraAgentBaseModel):
     """Container status information"""
 
     name: str
@@ -154,7 +144,7 @@ class ContainerStatus(KubernetesModel):
     allocated_resources: Optional[Dict[str, str]] = Field(None, alias="allocatedResources")
 
 
-class VolumeMount(KubernetesModel):
+class VolumeMount(InfraAgentBaseModel):
     """Volume mount specification"""
 
     name: str
@@ -163,14 +153,14 @@ class VolumeMount(KubernetesModel):
     recursive_read_only: str | None = Field(default=None, alias="recursiveReadOnly")
 
 
-class EnvVar(KubernetesModel):
+class EnvVar(InfraAgentBaseModel):
     """Environment variable specification"""
 
     name: str
     # value: Optional[str] = None
 
 
-class Container(KubernetesModel):
+class Container(InfraAgentBaseModel):
     """Container specification"""
 
     name: str
@@ -188,7 +178,7 @@ class Container(KubernetesModel):
     startup_probe: Optional[Dict[str, Any]] = Field(None, alias="startupProbe")
 
 
-class Volume(KubernetesModel):
+class Volume(InfraAgentBaseModel):
     """Volume specification"""
 
     name: str
@@ -198,7 +188,7 @@ class Volume(KubernetesModel):
     projected: Optional[Dict[str, Any]] = None
 
 
-class NodeSelectorRequirement(KubernetesModel):
+class NodeSelectorRequirement(InfraAgentBaseModel):
     """Node selector requirement"""
 
     key: str
@@ -206,20 +196,20 @@ class NodeSelectorRequirement(KubernetesModel):
     values: Optional[List[str]] = None
 
 
-class NodeSelectorTerm(KubernetesModel):
+class NodeSelectorTerm(InfraAgentBaseModel):
     """Node selector term"""
 
     match_expressions: Optional[List[NodeSelectorRequirement]] = Field(None, alias="matchExpressions")
     match_fields: Optional[List[NodeSelectorRequirement]] = Field(None, alias="matchFields")
 
 
-class NodeSelector(KubernetesModel):
+class NodeSelector(InfraAgentBaseModel):
     """Node selector"""
 
     node_selector_terms: List[NodeSelectorTerm] = Field(alias="nodeSelectorTerms")
 
 
-class NodeAffinity(KubernetesModel):
+class NodeAffinity(InfraAgentBaseModel):
     """Node affinity specification"""
 
     required_during_scheduling_ignored_during_execution: Optional[NodeSelector] = Field(
@@ -227,13 +217,13 @@ class NodeAffinity(KubernetesModel):
     )
 
 
-class Affinity(KubernetesModel):
+class Affinity(InfraAgentBaseModel):
     """Affinity specification"""
 
     node_affinity: Optional[NodeAffinity] = Field(None, alias="nodeAffinity")
 
 
-class Toleration(KubernetesModel):
+class Toleration(InfraAgentBaseModel):
     """Toleration specification"""
 
     key: Optional[str] = None
@@ -242,7 +232,7 @@ class Toleration(KubernetesModel):
     toleration_seconds: Optional[int] = Field(None, alias="tolerationSeconds")
 
 
-class PodSpec(KubernetesModel):
+class PodSpec(InfraAgentBaseModel):
     """Pod specification"""
 
     containers: List[Container]
@@ -259,7 +249,7 @@ class PodSpec(KubernetesModel):
     # priority: Optional[int] = None
 
 
-class PodCondition(KubernetesModel):
+class PodCondition(InfraAgentBaseModel):
     """Pod condition information"""
 
     type: str
@@ -270,13 +260,13 @@ class PodCondition(KubernetesModel):
     message: Optional[str] = None
 
 
-class PodIP(KubernetesModel):
+class PodIP(InfraAgentBaseModel):
     """Pod IP information"""
 
     ip: str
 
 
-class PodStatus(KubernetesModel):
+class PodStatus(InfraAgentBaseModel):
     """Pod status information"""
 
     conditions: Optional[List[PodCondition]] = None
@@ -284,7 +274,7 @@ class PodStatus(KubernetesModel):
     # container_statuses: Optional[List[ContainerStatus]] = Field(None, alias="containerStatuses")
 
 
-class PodMetadata(KubernetesModel):
+class PodMetadata(InfraAgentBaseModel):
     """Pod metadata"""
 
     name: str
@@ -293,7 +283,7 @@ class PodMetadata(KubernetesModel):
     annotations: Optional[Dict[str, str]] = None
 
 
-class Pod(KubernetesModel):
+class Pod(InfraAgentBaseModel):
     """Represents a Kubernetes Pod"""
 
     metadata: PodMetadata
@@ -301,19 +291,19 @@ class Pod(KubernetesModel):
     status: Optional[PodStatus] = None
 
 
-class KubernetesAnyList(KubernetesModel):
+class KubernetesAnyList(InfraAgentBaseModel):
     """Generic Kubernetes list"""
 
     items: List[str]
 
 
-class PodList(KubernetesModel):
+class PodList(InfraAgentBaseModel):
     """List of Kubernetes pods"""
 
     items: List[Pod]
 
 
-class KubernetesPodLogs(KubernetesModel):
+class KubernetesPodLogs(InfraAgentBaseModel):
     """Kubernetes Pod logs"""
 
     container_name: str
@@ -322,11 +312,24 @@ class KubernetesPodLogs(KubernetesModel):
     logs: List[str]
 
 
-class HelmReleaseMetadata(KubernetesModel):
+class KubernetesCapacity(InfraAgentBaseModel):
+    cpu: float | None = None
+    memory: str | None = None
+    pods: int | None = None
+    ephemeral_storage: str | None = None
+
+
+class KubernetesCapacityNodeReport(InfraAgentBaseModel):
+    name: str
+    capacity: KubernetesCapacity | None = None
+    allocatable: KubernetesCapacity | None = None
+
+
+class HelmReleaseMetadata(InfraAgentBaseModel):
     """Helm release metadata extracted from Kubernetes secret"""
 
     name: str
     namespace: str
     chart_name: str
-    default_values: Any
-    current_values: Any
+    default_values: str | None = None
+    values: dict[str, str] | None = None

@@ -24,6 +24,7 @@ autoflake = "^2.3.1"
 ratelimit = "^2.2.1"
 aiohttp = "^3.13.2"
 python-gitlab = "^7.0.0"
+ruamel-yaml = "^0.18.16"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.0"

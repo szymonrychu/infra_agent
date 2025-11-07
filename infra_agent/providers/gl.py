@@ -2,6 +2,7 @@ from typing import List
 
 import gitlab
 
+from infra_agent.models.generic import PromptToolError
 from infra_agent.models.gl import (
     GitlabCommit,
     GitlabFile,
@@ -21,15 +22,8 @@ async def list_opened_merge_requests() -> GitlabMergeRequestList:
         GitlabMergeRequest(
             id=mr.id,
             title=mr.title,
-            action=None,
             description=mr.description,
             state=mr.state,
-            created_at=mr.created_at,
-            updated_at=mr.updated_at,
-            merged_by=getattr(mr, "merged_by", None),
-            merged_at=getattr(mr, "merged_at", None),
-            closed_by=getattr(mr, "closed_by", None),
-            closed_at=getattr(mr, "closed_at", None),
             target_branch=mr.target_branch,
             source_branch=mr.source_branch,
         )
@@ -45,15 +39,8 @@ async def get_merge_request_details(mr_id: int) -> GitlabMergeRequest:
     return GitlabMergeRequest(
         id=mr.id,
         title=mr.title,
-        action=None,
         description=mr.description,
         state=mr.state,
-        created_at=mr.created_at,
-        updated_at=mr.updated_at,
-        merged_by=getattr(mr, "merged_by", None),
-        merged_at=getattr(mr, "merged_at", None),
-        closed_by=getattr(mr, "closed_by", None),
-        closed_at=getattr(mr, "closed_at", None),
         target_branch=mr.target_branch,
         source_branch=mr.source_branch,
     )
@@ -98,18 +85,120 @@ async def create_merge_request_from_branch(
     return GitlabMergeRequest(
         id=mr.id,
         title=mr.title,
-        action=None,
         description=mr.description,
-        state=mr.state,
-        created_at=mr.created_at,
-        updated_at=mr.updated_at,
-        merged_by=getattr(mr, "merged_by", None),
-        merged_at=getattr(mr, "merged_at", None),
-        closed_by=getattr(mr, "closed_by", None),
-        closed_at=getattr(mr, "closed_at", None),
         target_branch=mr.target_branch,
         source_branch=mr.source_branch,
     )
+
+
+class GitlabMergeRequestFactory:
+    def __init__(self):
+        self.__last_merge_request = None
+
+    async def start_merge_request(self, title: str, description: str):
+        self.__last_merge_request = GitlabMergeRequest(
+            title=title, description=description, target_branch="main", source_branch="ai-test"
+        )
+
+    async def add_file_to_merge_request(self, file_path: str, file_contents: str):
+        if not self.__last_merge_request:
+            raise PromptToolError(
+                message="It's not possible to add files to merge request if it's not created yet! run `start_merge_request` tool with `title` and `description` parameters first!",
+                inputs={"file_path": file_path, "file_contents": file_contents},
+                tool_name="add_file_to_merge_request",
+            )
+        await self.__last_merge_request.add_files(file_path, file_contents)
+
+    async def commit_and_push_merge_request(self, commit_message: str):
+        if not self.__last_merge_request:
+            raise PromptToolError(
+                message="It's not possible to add files to merge request if it's not created yet! run `start_merge_request` tool with `title` and `description` parameters first!",
+                inputs={"commit_message": commit_message},
+                tool_name="commit_and_push_merge_request",
+            )
+        if not self.__last_merge_request.merge_request_files:
+            raise PromptToolError(
+                message="It's not possible to push empty merge request if it's not created yet! run `start_merge_request` tool with `title` and `description` parameters first, then add file updates using `add_file_to_merge_request` tool!",
+                inputs={"commit_message": commit_message},
+                tool_name="commit_and_push_merge_request",
+            )
+        await self.__last_merge_request.commit_and_push(commit_message)
+        self.__last_merge_request.merge_request_files = {}
+
+
+async def create_merge_request(
+    merge_request_branch: str, commit_message: str, title: str, description: str, files_updated: dict[str, str]
+):
+    if not files_updated:
+        raise PromptToolError(
+            message="Missing or empty `file_contents` parameter! you MUST provide map of filepath/filecontents here!",
+            tool_name="create_merge_request",
+            inputs={
+                "merge_request_branch": merge_request_branch,
+                "commit_message": commit_message,
+                "title": title,
+                "description": description,
+                "files_updated": files_updated,
+            },
+        )
+    mr_target_branch_name = "main"
+    project = gl.projects.get(settings.GITLAB_HELMFILE_PROJECT_PATH)
+    existing_files = [f.file_path for f in await list_files_in_repository("main")]
+    commit_actions = []
+    for file_path, file_contents in files_updated.items():
+        commit_actions.append(
+            {
+                "action": "update" if file_path in existing_files else "create",
+                "file_path": file_path,
+                "content": file_contents,
+            }
+        )
+    try:
+        project.commits.create(
+            {
+                "commit_message": commit_message,
+                "author_email": "ai",
+                "author_name": "ai",
+                "actions": commit_actions,
+                "branch": merge_request_branch,
+                "start_branch": mr_target_branch_name,
+            }
+        )
+    except Exception as e:
+        raise PromptToolError(
+            message=f"Problem creating commit! {e}",
+            tool_name="create_merge_request",
+            inputs={
+                "merge_request_branch": merge_request_branch,
+                "commit_message": commit_message,
+                "title": title,
+                "description": description,
+                "files_updated": files_updated,
+            },
+        )
+
+    try:
+        project.mergerequests.create(
+            {
+                "source_branch": merge_request_branch,
+                "target_branch": mr_target_branch_name,
+                "title": title,
+                "description": description,
+                "labels": "ai,automerge",
+            }
+        )
+    except Exception as e:
+        raise PromptToolError(
+            message=f"Problem creating merge request from commit! {e}",
+            tool_name="create_merge_request",
+            inputs={
+                "merge_request_branch": merge_request_branch,
+                "commit_message": commit_message,
+                "title": title,
+                "description": description,
+                "files_updated": files_updated,
+            },
+        )
 
 
 async def approve_merge_request(mr_id: int) -> bool:
@@ -129,7 +218,7 @@ async def get_file_contents(branch: str, file_path: str) -> GitlabFile:
         file_name=file.file_name,
         size=file.size,
         encoding=file.encoding,
-        content=file.decode(),
+        content=file.decode().decode("utf8"),
         ref=branch,
         blob_id=getattr(file, "blob_id", None),
         commit_id=getattr(file, "commit_id", None),
@@ -141,7 +230,7 @@ async def get_file_contents(branch: str, file_path: str) -> GitlabFile:
 async def list_files_in_repository(branch: str, path: str = "") -> List[GitlabFile]:
     """List files in repository for a given branch and path."""
     project = gl.projects.get(settings.GITLAB_HELMFILE_PROJECT_PATH)
-    files = project.repository_tree(path=path, ref=branch, all=True)
+    files = project.repository_tree(path=path, ref=branch, all=True, recursive=True)
     result = []
     for f in files:
         result.append(

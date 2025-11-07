@@ -1,6 +1,7 @@
 import logging
 
 import uvicorn
+from uvicorn.config import LOGGING_CONFIG
 
 from infra_agent.settings import settings
 
@@ -11,11 +12,7 @@ def serve():
     kwargs = {}
     if settings.DEBUG:
         kwargs["reload"] = True
-    log_config = uvicorn.config.LOGGING_CONFIG
-    log_config["formatters"]["access"]["fmt"] = settings.LOG_FORMAT
-    if settings.SSL_KEY_PATH and settings.SSL_CERT_PATH:
-        kwargs["ssl_keyfile"] = settings.SSL_KEY_PATH
-        kwargs["ssl_certfile"] = settings.SSL_CERT_PATH
+    LOGGING_CONFIG["formatters"]["access"]["fmt"] = settings.LOG_FORMAT
     uvicorn.run("infra_agent.app:app", host=str(settings.HOST), port=settings.PORT, **kwargs)
 
 
