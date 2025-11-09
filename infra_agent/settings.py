@@ -114,6 +114,8 @@ BEHAVIOR RULES (critical — follow precisely):
      }}
    }}
 
+9.  When providing inputs to `add_file_to_merge_request` tool, always the **whole file** and provide **minimal changes** limited **only to relevant settings**.
+
 Follow these rules exactly. You are operating autonomously — do not output commentary or summaries outside of reasoning or tool calls.
 """
     GRAFANA_WEBHOOK_PROMPT_FORMAT: str = """
